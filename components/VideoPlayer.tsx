@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Hls, { ErrorDetails, ErrorTypes, Events } from 'hls.js';
 import { StreamEvent, StreamSource } from '../types';
 import { findFailoverSource, getStreamPlaybackUrl } from '../services/streamService';
@@ -63,8 +63,16 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   const [autoPlayNext, setAutoPlayNext] = useState(() => {
     return localStorage.getItem(AUTOPLAY_KEY) === 'true';
   });
-  const recoveryConfig = getRecoveryConfig(getProfileMeta().key);
-  const hlsConfig = getHlsConfig(getProfileMeta().key);
+  const profileKey = useMemo(() => getProfileMeta().key, []);
+  const recoveryConfig = getRecoveryConfig(profileKey);
+  const hlsConfig = getHlsConfig(profileKey);
+  const eventRef = useRef(event);
+  const onFailoverRef = useRef(onFailover);
+  const onNextRef = useRef(onNext);
+
+  eventRef.current = event;
+  onFailoverRef.current = onFailover;
+  onNextRef.current = onNext;
 
   const [volume, setVolume] = useState<number>(() => {
     const saved = localStorage.getItem(VOLUME_KEY);
@@ -109,6 +117,13 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
 
   useEffect(() => {
     const video = videoRef.current;
+    if (!video) return;
+    video.volume = volume;
+    video.muted = isMuted;
+  }, [volume, isMuted]);
+
+  useEffect(() => {
+    const video = videoRef.current;
     const playbackUrl = getStreamPlaybackUrl(activeStream);
     if (!video || !playbackUrl) return;
 
@@ -121,9 +136,6 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
       hlsRef.current = null;
     }
 
-    video.volume = volume;
-    video.muted = isMuted;
-
     setLoading(true);
     setSwitchingSource(isSourceSwitch);
     setError(null);
@@ -135,7 +147,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const handleEnded = () => {
       if (autoPlayNext) {
-        onNext();
+        onNextRef.current();
       }
     };
 
@@ -163,9 +175,9 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const failOrFailover = (message: string) => {
       clearRecoveryTimers();
-      const fallback = findFailoverSource(event, activeStream.id);
+      const fallback = findFailoverSource(eventRef.current, activeStream.id);
       if (fallback) {
-        onFailover(fallback);
+        onFailoverRef.current(fallback);
         return;
       }
       setError(message);
@@ -311,7 +323,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
       video.removeEventListener('ended', handleEnded);
       clearRecoveryTimers();
     };
-  }, [activeStream.id, activeStream.playbackUrl, activeStream.url, autoPlayNext, event, hlsConfig, onFailover, onNext, recoveryConfig, volume, isMuted]);
+  }, [activeStream.id, activeStream.playbackUrl, activeStream.url, autoPlayNext, hlsConfig, profileKey, recoveryConfig]);
 
   const togglePip = async () => {
     if (!videoRef.current) return;
