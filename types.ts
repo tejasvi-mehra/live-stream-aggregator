@@ -43,6 +43,7 @@ export interface StreamSource {
   channelUrl?: string;
   channelId?: string;
   hidden: boolean;
+  playbackUrl?: string;
   status?: StreamHealthStatus;
   liveTitle?: string;
 }
@@ -67,9 +68,10 @@ export interface StreamHealthStatus {
   latencyMs: number | null;
   checkedAt: string;
   error?: string;
+  uncertain?: boolean;
 }
 
-export enum AppRoute {
-  HOME = 'home',
-  LEGAL = 'legal',
+export interface CatalogHealthResult {
+  categories: StreamCategory[];
+  healthUnavailable: boolean;
 }

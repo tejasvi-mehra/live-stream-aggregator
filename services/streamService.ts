@@ -7,8 +7,10 @@ import {
   StreamSource,
   StreamsConfig,
   StreamType,
+  CatalogHealthResult,
 } from '../types';
 import { resolveYouTubeLive } from './youtubeService';
+import { apiUrl } from './apiBase';
 import streamsYaml from '../config/streams.yaml?raw';
 
 const config = yaml.load(streamsYaml) as StreamsConfig;
@@ -117,92 +119,190 @@ export const filterCatalog = (
     }));
 };
 
-const checkHlsStreamHealth = async (url: string): Promise<StreamHealthStatus> => {
-  const started = performance.now();
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
-    const response = await fetch(url, {
-      method: 'GET',
-      mode: 'cors',
-      signal: controller.signal,
-      headers: { Accept: 'application/vnd.apple.mpegurl, application/x-mpegURL, */*' },
-    });
-
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const body = await response.text();
-    if (!body.includes('#EXTM3U')) {
-      throw new Error('Response is not a valid HLS manifest');
-    }
-
-    return {
-      reachable: true,
-      latencyMs: Math.round(performance.now() - started),
-      checkedAt: new Date().toISOString(),
-    };
-  } catch (error) {
-    return {
-      reachable: false,
-      latencyMs: null,
-      checkedAt: new Date().toISOString(),
-      error: error instanceof Error ? error.message : 'Connection failed',
-    };
+const checkHlsStreamHealthBatch = async (
+  urls: string[]
+): Promise<Record<string, StreamHealthStatus>> => {
+  const uniqueUrls = [...new Set(urls.filter(Boolean))];
+  if (uniqueUrls.length === 0) {
+    return {};
   }
+
+  const response = await fetch(apiUrl('/api/hls/health/batch'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ urls: uniqueUrls }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Health batch failed: HTTP ${response.status}`);
+  }
+
+  const payload = (await response.json()) as { results?: Record<string, StreamHealthStatus> };
+  return payload.results ?? {};
 };
 
-export const checkSourceHealth = async (source: StreamSource): Promise<StreamSource> => {
-  if (source.type === 'youtube') {
-    const started = performance.now();
-    const live = await resolveYouTubeLive(source.channelUrl, source.channelId);
+const checkYouTubeSourceHealth = async (source: StreamSource): Promise<StreamSource> => {
+  const started = performance.now();
+  const live = await resolveYouTubeLive(source.channelUrl, source.channelId);
 
-    if (live.isLive && live.channelId) {
-      return {
-        ...source,
-        channelId: live.channelId,
-        liveTitle: live.title,
-        status: {
-          reachable: true,
-          latencyMs: Math.round(performance.now() - started),
-          checkedAt: new Date().toISOString(),
-        },
-      };
-    }
-
+  if (live.isLive && live.channelId) {
     return {
       ...source,
-      liveTitle: undefined,
+      channelId: live.channelId,
+      liveTitle: live.title,
       status: {
-        reachable: false,
-        latencyMs: null,
+        reachable: true,
+        latencyMs: Math.round(performance.now() - started),
         checkedAt: new Date().toISOString(),
-        error: live.error ?? 'Not live',
       },
     };
   }
 
-  const status = await checkHlsStreamHealth(source.url);
-  return { ...source, status };
+  return {
+    ...source,
+    liveTitle: undefined,
+    status: {
+      reachable: false,
+      latencyMs: null,
+      checkedAt: new Date().toISOString(),
+      error: live.error ?? 'Not live',
+    },
+  };
 };
 
-const checkEventHealth = async (event: StreamEvent): Promise<StreamEvent> => {
-  const streams = await Promise.all(event.streams.map((source) => checkSourceHealth(source)));
-  return { ...event, streams };
+export const wrapHlsPlaybackUrl = (url: string): string => {
+  if (!url) {
+    return url;
+  }
+  return apiUrl(`/api/hls/proxy?url=${encodeURIComponent(url)}`);
 };
 
-export const checkCatalogHealth = async (categories: StreamCategory[]): Promise<StreamCategory[]> => {
+export const getStreamPlaybackUrl = (source: StreamSource): string => {
+  if (source.type === 'youtube') {
+    return source.url;
+  }
+  return source.playbackUrl ?? wrapHlsPlaybackUrl(source.url);
+};
+
+export const checkSourceHealth = async (source: StreamSource): Promise<StreamSource> => {
+  if (source.type === 'youtube') {
+    return checkYouTubeSourceHealth(source);
+  }
+
+  const response = await fetch(apiUrl(`/api/hls/health?url=${encodeURIComponent(source.url)}`));
+  const status = (await response.json()) as StreamHealthStatus;
+  return {
+    ...source,
+    status,
+    playbackUrl: status.reachable ? wrapHlsPlaybackUrl(source.url) : undefined,
+  };
+};
+
+const collectHlsUrls = (categories: StreamCategory[]): string[] => {
+  const urls: string[] = [];
+  for (const category of categories) {
+    for (const event of category.events) {
+      for (const source of event.streams) {
+        if (source.type !== 'youtube' && source.url) {
+          urls.push(source.url);
+        }
+      }
+    }
+  }
+  return urls;
+};
+
+const applyHlsHealthResults = (
+  categories: StreamCategory[],
+  healthByUrl: Record<string, StreamHealthStatus>
+): StreamCategory[] => {
+  return categories.map((category) => ({
+    ...category,
+    events: category.events.map((event) => ({
+      ...event,
+      streams: event.streams.map((source) => {
+        if (source.type === 'youtube') {
+          return source;
+        }
+
+        const status = healthByUrl[source.url] ?? {
+          reachable: false,
+          latencyMs: null,
+          checkedAt: new Date().toISOString(),
+          error: 'Health check missing from batch response',
+        };
+
+        return {
+          ...source,
+          status,
+          playbackUrl: status.reachable ? wrapHlsPlaybackUrl(source.url) : undefined,
+        };
+      }),
+    })),
+  }));
+};
+
+const applyDegradedHlsHealth = (categories: StreamCategory[]): StreamCategory[] => {
+  const checkedAt = new Date().toISOString();
+  return categories.map((category) => ({
+    ...category,
+    events: category.events.map((event) => ({
+      ...event,
+      streams: event.streams.map((source) => {
+        if (source.type === 'youtube') {
+          return source;
+        }
+
+        return {
+          ...source,
+          status: {
+            reachable: true,
+            uncertain: true,
+            latencyMs: null,
+            checkedAt,
+            error: 'Availability not verified',
+          },
+          playbackUrl: wrapHlsPlaybackUrl(source.url),
+        };
+      }),
+    })),
+  }));
+};
+
+const attachYouTubeHealth = async (categories: StreamCategory[]): Promise<StreamCategory[]> => {
   return Promise.all(
     categories.map(async (category) => ({
       ...category,
-      events: await Promise.all(category.events.map((event) => checkEventHealth(event))),
+      events: await Promise.all(
+        category.events.map(async (event) => ({
+          ...event,
+          streams: await Promise.all(
+            event.streams.map(async (source) =>
+              source.type === 'youtube' ? checkYouTubeSourceHealth(source) : source
+            )
+          ),
+        }))
+      ),
     }))
   );
+};
+
+export const checkCatalogHealth = async (
+  categories: StreamCategory[]
+): Promise<CatalogHealthResult> => {
+  try {
+    const healthByUrl = await checkHlsStreamHealthBatch(collectHlsUrls(categories));
+    const withHls = applyHlsHealthResults(categories, healthByUrl);
+    return {
+      categories: await attachYouTubeHealth(withHls),
+      healthUnavailable: false,
+    };
+  } catch {
+    return {
+      categories: await attachYouTubeHealth(applyDegradedHlsHealth(categories)),
+      healthUnavailable: true,
+    };
+  }
 };
 
 export const isSourcePlayable = (source: StreamSource): boolean => {
@@ -275,12 +375,16 @@ export const getEventSourceSummary = (event: StreamEvent) => {
   const visiblePlayable = visibleSources.filter(isSourcePlayable);
   const bestLatency = visiblePlayable.find((source) => source.status?.latencyMs != null)?.status
     ?.latencyMs;
+  const hasUncertainHealth = event.streams.some(
+    (source) => source.status?.uncertain && !source.hidden
+  );
 
   return {
     hasYouTube,
     isLive: isEventPlayable(event),
     sourceCount: visibleSources.length,
     bestLatency,
+    hasUncertainHealth,
   };
 };
 

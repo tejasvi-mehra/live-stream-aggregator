@@ -85,6 +85,9 @@ const EventCard: React.FC<EventCardProps> = ({ event, onClick }) => {
               )}
             </>
           )}
+          {summary.hasUncertainHealth && (
+            <span className="bg-amber-600 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">Unverified</span>
+          )}
           {summary.sourceCount > 1 && (
             <span className="bg-slate-700 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">
               {summary.sourceCount} sources
