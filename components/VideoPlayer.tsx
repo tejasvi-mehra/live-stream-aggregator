@@ -1,7 +1,14 @@
 
 import React, { useEffect, useRef, useState } from 'react';
+import Hls, { ErrorDetails, ErrorTypes, Events } from 'hls.js';
 import { StreamEvent, StreamSource } from '../types';
-import { findFailoverSource } from '../services/streamService';
+import { findFailoverSource, getStreamPlaybackUrl } from '../services/streamService';
+import {
+  getHlsConfig,
+  getRecoveryConfig,
+  shouldFailoverAfterAttempt,
+} from '../hlsConfig';
+import { getProfileMeta } from '../services/streamService';
 import YouTubePlayer from './YouTubePlayer';
 import PlayerNavButtons from './PlayerNavButtons';
 import SourceSwitcher from './SourceSwitcher';
@@ -41,9 +48,14 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   onSelectSource,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<any>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const prevSourceIdRef = useRef<string | null>(null);
+  const recoverAttemptsRef = useRef(0);
+  const recoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [switchingSource, setSwitchingSource] = useState(false);
   const [qualities, setQualities] = useState<QualityLevel[]>([]);
   const [currentQuality, setCurrentQuality] = useState<number>(-1);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
@@ -51,6 +63,8 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   const [autoPlayNext, setAutoPlayNext] = useState(() => {
     return localStorage.getItem(AUTOPLAY_KEY) === 'true';
   });
+  const recoveryConfig = getRecoveryConfig(getProfileMeta().key);
+  const hlsConfig = getHlsConfig(getProfileMeta().key);
 
   const [volume, setVolume] = useState<number>(() => {
     const saved = localStorage.getItem(VOLUME_KEY);
@@ -95,12 +109,23 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !activeStream.url) return;
+    const playbackUrl = getStreamPlaybackUrl(activeStream);
+    if (!video || !playbackUrl) return;
+
+    const isSourceSwitch =
+      prevSourceIdRef.current !== null && prevSourceIdRef.current !== activeStream.id;
+    prevSourceIdRef.current = activeStream.id;
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
 
     video.volume = volume;
     video.muted = isMuted;
 
     setLoading(true);
+    setSwitchingSource(isSourceSwitch);
     setError(null);
     setQualities([]);
     setCurrentQuality(-1);
@@ -118,64 +143,165 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
     video.addEventListener('leavepictureinpicture', handleLeavePip);
     video.addEventListener('ended', handleEnded);
 
-    // @ts-ignore — HLS.js loaded from CDN in index.html
-    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-      // @ts-ignore
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+    recoverAttemptsRef.current = 0;
+
+    const clearRecoveryTimers = () => {
+      if (recoverTimerRef.current) {
+        clearTimeout(recoverTimerRef.current);
+        recoverTimerRef.current = null;
+      }
+      if (stallTimerRef.current) {
+        clearTimeout(stallTimerRef.current);
+        stallTimerRef.current = null;
+      }
+    };
+
+    const resetRecovery = () => {
+      recoverAttemptsRef.current = 0;
+      clearRecoveryTimers();
+    };
+
+    const failOrFailover = (message: string) => {
+      clearRecoveryTimers();
+      const fallback = findFailoverSource(event, activeStream.id);
+      if (fallback) {
+        onFailover(fallback);
+        return;
+      }
+      setError(message);
+      setLoading(false);
+    };
+
+    const scheduleRecover = (reason: string, recover: () => void) => {
+      recoverAttemptsRef.current += 1;
+      if (shouldFailoverAfterAttempt(recoverAttemptsRef.current, recoveryConfig.maxAttempts)) {
+        failOrFailover(`Stream Error: ${reason}`);
+        return;
+      }
+
+      const delay = recoveryConfig.baseDelayMs * 2 ** (recoverAttemptsRef.current - 1);
+      clearRecoveryTimers();
+      recoverTimerRef.current = setTimeout(() => {
+        recover();
+        video.play().catch(() => undefined);
+      }, delay);
+    };
+
+    const handlePlaying = () => {
+      resetRecovery();
+    };
+
+    if (Hls.isSupported()) {
+      const hls = new Hls(hlsConfig);
       hlsRef.current = hls;
-      hls.loadSource(activeStream.url);
+      hls.loadSource(playbackUrl);
       hls.attachMedia(video);
 
-      hls.on('hlsManifestParsed', () => {
-        const levels = hls.levels.map((level: any, index: number) => ({
+      hls.on(Events.MANIFEST_PARSED, () => {
+        const levels = hls.levels.map((level, index) => ({
           index,
           label: level.height ? `${level.height}p` : `L${index + 1}`,
         }));
         setQualities(levels);
+        setSwitchingSource(false);
         video.play().catch((e) => console.error('Auto-play blocked', e));
         setLoading(false);
       });
 
-      hls.on('hlsError', (_event: any, data: any) => {
+      hls.on(Events.ERROR, (_event, data) => {
         if (data.fatal) {
-          const fallback = findFailoverSource(event, activeStream.id);
-          if (fallback) {
-            onFailover(fallback);
-            return;
+          switch (data.type) {
+            case ErrorTypes.NETWORK_ERROR:
+              scheduleRecover('network', () => hls.startLoad());
+              return;
+            case ErrorTypes.MEDIA_ERROR:
+              scheduleRecover('media', () => hls.recoverMediaError());
+              return;
+            default:
+              failOrFailover(`Stream Error: ${data.type}`);
+              return;
           }
-          setError(`Stream Error: ${data.type}`);
-          setLoading(false);
+        }
+
+        if (
+          data.details === ErrorDetails.BUFFER_STALLED_ERROR ||
+          data.details === ErrorDetails.FRAG_LOAD_ERROR ||
+          data.details === ErrorDetails.LEVEL_LOAD_ERROR
+        ) {
+          scheduleRecover(data.details, () => {
+            hls.recoverMediaError();
+            hls.startLoad();
+          });
         }
       });
+
+      const handleWaiting = () => {
+        if (stallTimerRef.current) return;
+        stallTimerRef.current = setTimeout(() => {
+          stallTimerRef.current = null;
+          if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+            return;
+          }
+          scheduleRecover('stall', () => {
+            hls.recoverMediaError();
+            hls.startLoad();
+          });
+        }, recoveryConfig.stallThresholdMs);
+      };
+
+      video.addEventListener('waiting', handleWaiting);
+      video.addEventListener('playing', handlePlaying);
 
       return () => {
         video.removeEventListener('enterpictureinpicture', handleEnterPip);
         video.removeEventListener('leavepictureinpicture', handleLeavePip);
         video.removeEventListener('ended', handleEnded);
+        video.removeEventListener('waiting', handleWaiting);
+        video.removeEventListener('playing', handlePlaying);
+        clearRecoveryTimers();
         hls.destroy();
+        hlsRef.current = null;
       };
     }
 
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = activeStream.url;
+      video.src = playbackUrl;
       const onMetadata = () => {
+        setSwitchingSource(false);
         video.play().catch(console.error);
         setLoading(false);
       };
       const onNativeError = () => {
-        const fallback = findFailoverSource(event, activeStream.id);
-        if (fallback) {
-          onFailover(fallback);
-          return;
-        }
-        setError('Stream Error: playback failed');
-        setLoading(false);
+        scheduleRecover('native playback', () => {
+          const currentTime = video.currentTime;
+          video.load();
+          video.currentTime = currentTime;
+        });
       };
+      const handleWaitingNative = () => {
+        if (stallTimerRef.current) return;
+        stallTimerRef.current = setTimeout(() => {
+          stallTimerRef.current = null;
+          if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+            return;
+          }
+          onNativeError();
+        }, recoveryConfig.stallThresholdMs);
+      };
+
       video.addEventListener('loadedmetadata', onMetadata);
       video.addEventListener('error', onNativeError);
+      video.addEventListener('waiting', handleWaitingNative);
+      video.addEventListener('playing', handlePlaying);
       return () => {
         video.removeEventListener('loadedmetadata', onMetadata);
         video.removeEventListener('error', onNativeError);
+        video.removeEventListener('waiting', handleWaitingNative);
+        video.removeEventListener('playing', handlePlaying);
+        video.removeEventListener('enterpictureinpicture', handleEnterPip);
+        video.removeEventListener('leavepictureinpicture', handleLeavePip);
+        video.removeEventListener('ended', handleEnded);
+        clearRecoveryTimers();
       };
     }
 
@@ -183,8 +309,9 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
       video.removeEventListener('enterpictureinpicture', handleEnterPip);
       video.removeEventListener('leavepictureinpicture', handleLeavePip);
       video.removeEventListener('ended', handleEnded);
+      clearRecoveryTimers();
     };
-  }, [activeStream.id, activeStream.url, autoPlayNext, event, onFailover, onNext, volume, isMuted]);
+  }, [activeStream.id, activeStream.playbackUrl, activeStream.url, autoPlayNext, event, hlsConfig, onFailover, onNext, recoveryConfig, volume, isMuted]);
 
   const togglePip = async () => {
     if (!videoRef.current) return;
@@ -274,8 +401,13 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
 
       <div className={`relative bg-black flex-1 min-h-0 ${isMinimized ? '' : 'group'}`}>
         {loading && !isPipActive && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20 backdrop-blur-sm">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 z-20 backdrop-blur-sm">
             <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-500"></div>
+            {switchingSource && (
+              <p className="mt-3 text-xs font-bold uppercase tracking-widest text-slate-300">
+                Switching source...
+              </p>
+            )}
           </div>
         )}
 

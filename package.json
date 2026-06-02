@@ -4,13 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:test": "VITE_STREAM_PROFILE=test vite",
-    "dev:production": "VITE_STREAM_PROFILE=production vite",
+    "dev": "VITE_API_BASE=http://localhost:3002 vite",
+    "dev:test": "VITE_API_BASE=http://localhost:3002 VITE_STREAM_PROFILE=test vite",
+    "dev:production": "VITE_API_BASE=http://localhost:3002 VITE_STREAM_PROFILE=production vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
+    "hls.js": "1.6.16",
     "js-yaml": "^4.1.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
@@ -20,6 +22,7 @@
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vitest": "^3.2.4"
   }
 }
