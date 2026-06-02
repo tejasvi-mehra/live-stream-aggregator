@@ -1,9 +1,12 @@
 
-interface YouTubeLiveResult {
+import { apiUrl } from './apiBase';
+
+export interface YouTubeLiveResult {
   isLive: boolean;
   channelId?: string;
   title?: string;
   error?: string;
+  method?: 'scrape' | 'data_api';
 }
 
 export async function resolveYouTubeLive(
@@ -20,7 +23,7 @@ export async function resolveYouTubeLive(
   }
 
   try {
-    const response = await fetch(`/api/youtube/live?${params.toString()}`);
+    const response = await fetch(apiUrl(`/api/youtube/live?${params.toString()}`));
     return (await response.json()) as YouTubeLiveResult;
   } catch (error) {
     return {
