@@ -1,5 +1,7 @@
 # Override profile at runtime with VITE_STREAM_PROFILE=test|production
-activeProfile: test
+# Default profile is production. Hidden HLS URLs below are public IPTV-style demo
+# feeds used to exercise proxy/failover — not private or owned live streams.
+activeProfile: production
 
 profiles:
   test:
@@ -45,26 +47,11 @@ profiles:
       - id: basketball
         name: Basketball
         events:
-          - id: nba-live
-            name: HoopFlix
-            logo: /assets/hoopflix.png
+          - id: basketball-events
+            name: BasketBall Events
+            logo: https://upload.wikimedia.org/wikipedia/commons/7/7a/Basketball.png
             streams:
-              - hidden: true
-                url: https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8
-              - type: youtube
-                channelId: UC1Wt-vBY7SOjROTUMJHsp5Q
-                channelUrl: https://www.youtube.com/@HoopFlix
-              - type: youtube
-                channelId: UCZkd1SsoIdSY-8FEvvwRyEw
-                channelUrl: https://www.youtube.com/@LockedOnNBA
-
-          - id: locked-on-nba
-            name: Locked On NBA
-            logo: /assets/locked_on_nba.png
-            streams:
-              - type: youtube
-                channelId: UCZkd1SsoIdSY-8FEvvwRyEw
-                channelUrl: https://www.youtube.com/@LockedOnNBA
+              - url: http://23.237.104.106:8080/USA_FOX_DEPORTES/index.m3u8
           
           - id: fiba-world-2026
             name: FIBA 3x3 World Tour 2026
@@ -92,22 +79,8 @@ profiles:
             name: NFL
             logo: https://upload.wikimedia.org/wikipedia/en/a/a2/National_Football_League_logo.svg
             streams:
-              - hidden: true
-                url: https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8
-              - type: youtube
-                channelId: UCDVYQ4Zhbm3S2dlz7P1GBDg
-                channelUrl: https://www.youtube.com/@NFL
-              - type: youtube
-                channelId: UCPTyKqvL9KQlZSH8woMMs-w
-                channelUrl: https://www.youtube.com/@LockedOnNFL
+              - url: https://kanal75xto-llhls.akamaized.net/live/Data/atg-kanal-15-02a-rr/HLS-Legacy-HL/atg-kanal-15-02a-rr.m3u8
 
-          - id: locked-on-nfl
-            name: Locked On NFL
-            logo: /assets/locked_on_nfl.png
-            streams:
-              - type: youtube
-                channelId: UCPTyKqvL9KQlZSH8woMMs-w
-                channelUrl: https://www.youtube.com/@LockedOnNFL
 
       - id: motorsport
         name: Motorsport
@@ -116,8 +89,57 @@ profiles:
             name: Formula 1
             logo: https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/F1.svg/250px-F1.svg.png
             streams:
+              - url: https://streamtv.as3sport.online:3394/hybrid/play.m3u8
+
+      - id: red-bull
+        name: RedBull
+        events: 
+          - id: padel
+            name: RedBull Padel
+            logo: https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Soccer_ball.svg/250px-Soccer_ball.svg.png
+            streams:
+              - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/video/1280x720.m3u8 
+
+      - id: youtube
+        name: YouTube Live Streams
+        # Sample channel handles for demo — swap to official league/broadcaster channels during live events
+        events:
+          - id: locked-on-nba
+            name: Locked On NBA
+            logo: /assets/locked_on_nba.png
+            streams:
+              - type: youtube
+                channelId: UCZkd1SsoIdSY-8FEvvwRyEw
+                channelUrl: https://www.youtube.com/@LockedOnNBA
+          - id: hoop-flix
+            name: HoopFlix
+            logo: /assets/hoopflix.png
+            streams: 
+              - type: youtube
+                channelId: UC1Wt-vBY7SOjROTUMJHsp5Q
+                channelUrl: https://www.youtube.com/@HoopFlix
+          - id: locked-on-nfl
+            name: Locked On NFL
+            logo: /assets/locked_on_nfl.png
+            streams:
+              - type: youtube
+                channelId: UCPTyKqvL9KQlZSH8woMMs-w
+                channelUrl: https://www.youtube.com/@LockedOnNFL
+          - id: NFL
+            name: NFL
+            logo: https://upload.wikimedia.org/wikipedia/en/a/a2/National_Football_League_logo.svg
+            streams:
+              - type: youtube
+                channelId: UCDVYQ4Zhbm3S2dlz7P1GBDg
+                channelUrl: https://www.youtube.com/@NFL
+
+          - id: f1-live
+            name: Formula 1
+            logo: https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/F1.svg/250px-F1.svg.png
+            streams:
               - type: youtube
                 channelUrl: https://www.youtube.com/@Formula1
+
 
       - id: soccer
         name: Soccer
@@ -126,6 +148,4 @@ profiles:
             name: Soccer Live Match
             logo: https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Soccer_ball.svg/250px-Soccer_ball.svg.png
             streams:
-              - hidden: true
-                url: https://devstreaming-cdn.apple.com/videos/streaming/examples/adv_dv_atmos/main.m3u8
-              - url: https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8
+              - url: https://africa24.vedge.infomaniak.com/livecast/ik:africa24sport/manifest.m3u8
