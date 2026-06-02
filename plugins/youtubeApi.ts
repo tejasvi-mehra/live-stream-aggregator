@@ -136,7 +136,7 @@ function sendJson(res: Connect.ServerResponse, status: number, body: unknown) {
 
 export function youtubeApiPlugin(): Plugin {
   return {
-    name: 'sportstream-youtube-live',
+    name: 'live-stream-aggregator-youtube-live',
     configureServer(server) {
       server.middlewares.use('/api/youtube/live', async (req, res) => {
         if (req.method !== 'GET') {

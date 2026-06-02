@@ -24,9 +24,9 @@ interface VideoPlayerProps {
   onSelectSource: (stream: StreamSource) => void;
 }
 
-const AUTOPLAY_KEY = 'sportstream_autoplay_next';
-const VOLUME_KEY = 'sportstream_volume';
-const MUTED_KEY = 'sportstream_muted';
+const AUTOPLAY_KEY = 'livestream_autoplay_next';
+const VOLUME_KEY = 'livestream_volume';
+const MUTED_KEY = 'livestream_muted';
 
 const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   event,
