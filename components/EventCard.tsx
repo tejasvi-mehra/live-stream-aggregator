@@ -1,33 +1,36 @@
 
 import React from 'react';
 import { StreamEvent } from '../types';
-import { getEventSourceSummary, isEventPlayable } from '../services/streamService';
+import { isEventSelectable } from '../services/streamService';
 import { FALLBACK_LOGO } from '../constants';
 
 interface EventCardProps {
   event: StreamEvent;
-  onClick: (event: StreamEvent) => void;
+  isOpening?: boolean;
+  onClick: (event: StreamEvent) => void | Promise<void>;
 }
 
-const EventCard: React.FC<EventCardProps> = ({ event, onClick }) => {
-  const playable = isEventPlayable(event);
-  const summary = getEventSourceSummary(event);
+const EventCard: React.FC<EventCardProps> = ({ event, isOpening = false, onClick }) => {
+  const selectable = isEventSelectable(event);
+  const visibleSourceCount = event.streams.filter((source) => !source.hidden).length;
 
   const handleClick = () => {
-    if (!playable) return;
-    onClick(event);
+    if (!selectable || isOpening) return;
+    void onClick(event);
   };
 
   return (
     <div
       onClick={handleClick}
       className={`group relative flex flex-col gap-2 transition-transform duration-300 ${
-        playable ? 'cursor-pointer hover:scale-105' : 'cursor-not-allowed opacity-70'
+        selectable && !isOpening
+          ? 'cursor-pointer hover:scale-105'
+          : 'cursor-not-allowed opacity-70'
       }`}
     >
       <div
         className={`aspect-video w-full bg-slate-800 rounded-lg overflow-hidden border relative ${
-          playable
+          selectable && !isOpening
             ? 'border-slate-700 group-hover:border-emerald-500'
             : 'border-slate-800'
         }`}
@@ -50,7 +53,13 @@ const EventCard: React.FC<EventCardProps> = ({ event, onClick }) => {
           )}
         </div>
 
-        {playable && (
+        {isOpening && (
+          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-emerald-500" />
+          </div>
+        )}
+
+        {selectable && !isOpening && (
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
             <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-emerald-600 rounded-full p-3 shadow-xl">
               <svg className="w-6 h-6 text-white translate-x-0.5" fill="currentColor" viewBox="0 0 24 24">
@@ -60,45 +69,18 @@ const EventCard: React.FC<EventCardProps> = ({ event, onClick }) => {
           </div>
         )}
 
-        <div className="absolute top-2 left-2 flex flex-wrap gap-1">
-          {summary.hasYouTube && (
-            <span className="bg-red-600 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">YouTube</span>
-          )}
-          {summary.hasYouTube ? (
-            <span
-              className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
-                summary.isLive ? 'bg-emerald-600 animate-pulse' : 'bg-slate-600'
-              }`}
-            >
-              {summary.isLive ? 'Live' : 'Not live'}
+        {visibleSourceCount > 1 && (
+          <div className="absolute top-2 left-2">
+            <span className="bg-slate-700/90 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">
+              {visibleSourceCount} sources
             </span>
-          ) : (
-            <>
-              <span className="bg-red-600 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">Live</span>
-              {summary.bestLatency != null && (
-                <span className="bg-emerald-600 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">
-                  {summary.bestLatency}ms
-                </span>
-              )}
-              {!summary.isLive && (
-                <span className="bg-slate-700 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">Offline</span>
-              )}
-            </>
-          )}
-          {summary.hasUncertainHealth && (
-            <span className="bg-amber-600 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">Unverified</span>
-          )}
-          {summary.sourceCount > 1 && (
-            <span className="bg-slate-700 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase">
-              {summary.sourceCount} sources
-            </span>
-          )}
-        </div>
+          </div>
+        )}
       </div>
       <div className="px-1">
         <h3
           className={`text-sm font-semibold truncate transition-colors ${
-            playable ? 'text-slate-100 group-hover:text-emerald-400' : 'text-slate-400'
+            selectable ? 'text-slate-100 group-hover:text-emerald-400' : 'text-slate-400'
           }`}
         >
           {event.name}

@@ -52,6 +52,7 @@ export const fetchStreamsConfig = async (refresh = false): Promise<StreamsConfig
 
 export interface LoadedCatalog {
   categories: StreamCategory[];
+  featuredEventId: string | null;
   profile: {
     key: 'test' | 'production';
     description: string;
@@ -70,6 +71,27 @@ export const getProfileMeta = () => {
     key,
     description: cachedConfig.profiles[key].description,
   };
+};
+
+const CATEGORY_SORT_ORDER: Record<string, number> = {
+  basketball: 0,
+  cricket: 1,
+  football: 2,
+  soccer: 3,
+  motorsport: 4,
+  'red-bull': 5,
+  youtube: 6,
+};
+
+const sortCategories = (categories: StreamCategory[]): StreamCategory[] => {
+  return [...categories].sort((a, b) => {
+    const aOrder = CATEGORY_SORT_ORDER[a.id] ?? 999;
+    const bOrder = CATEGORY_SORT_ORDER[b.id] ?? 999;
+    if (aOrder !== bOrder) {
+      return aOrder - bOrder;
+    }
+    return a.name.localeCompare(b.name);
+  });
 };
 
 const buildSource = (
@@ -122,13 +144,46 @@ const buildCategoriesFromConfig = (config: StreamsConfig): StreamCategory[] => {
       id: event.id,
       name: event.name,
       logo: event.logo,
+      featured: event.featured === true,
       categoryId: category.id,
       categoryName: category.name,
       streams: event.streams.map((source, index) => buildSource(event.id, source, index)),
     })),
   }));
 
-  return isYouTubeDisabled() ? stripYouTubeFromCatalog(categories) : categories;
+  return sortCategories(
+    isYouTubeDisabled() ? stripYouTubeFromCatalog(categories) : categories
+  );
+};
+
+export const resolveFeaturedEventId = (config: StreamsConfig): string | null => {
+  const profile = config.profiles[getActiveProfileKey(config)];
+
+  for (const category of profile.categories) {
+    for (const event of category.events) {
+      if (event.featured === true) {
+        return event.id;
+      }
+    }
+  }
+
+  return null;
+};
+
+export const getFeaturedEvent = (
+  categories: StreamCategory[],
+  featuredEventId: string | null
+): StreamEvent | null => {
+  if (!featuredEventId) {
+    return null;
+  }
+
+  const event = findEventById(categories, featuredEventId);
+  if (!event || !isEventSelectable(event)) {
+    return null;
+  }
+
+  return event;
 };
 
 export const loadConfiguredCatalog = async (refresh = false): Promise<LoadedCatalog> => {
@@ -137,6 +192,7 @@ export const loadConfiguredCatalog = async (refresh = false): Promise<LoadedCata
 
   return {
     categories: buildCategoriesFromConfig(config),
+    featuredEventId: resolveFeaturedEventId(config),
     profile: {
       key,
       description: config.profiles[key].description,
@@ -260,19 +316,70 @@ const collectHlsUrls = (categories: StreamCategory[]): string[] => {
   const urls: string[] = [];
   for (const category of categories) {
     for (const event of category.events) {
-      for (const source of event.streams) {
-        if (source.type !== 'youtube' && source.url) {
-          urls.push(source.url);
-        }
-        for (const track of source.audioTracks ?? []) {
-          if (track.url) {
-            urls.push(track.url);
-          }
-        }
+      urls.push(...collectEventHlsUrls(event));
+    }
+  }
+  return urls;
+};
+
+const collectEventHlsUrls = (event: StreamEvent): string[] => {
+  const urls: string[] = [];
+  for (const source of event.streams) {
+    if (source.type !== 'youtube' && source.url) {
+      urls.push(source.url);
+    }
+    for (const track of source.audioTracks ?? []) {
+      if (track.url) {
+        urls.push(track.url);
       }
     }
   }
   return urls;
+};
+
+const eventToCategory = (event: StreamEvent): StreamCategory => ({
+  id: event.categoryId,
+  name: event.categoryName,
+  events: [event],
+});
+
+const applyHealthToEvent = async (
+  event: StreamEvent
+): Promise<{ event: StreamEvent; healthUnavailable: boolean }> => {
+  try {
+    const healthByUrl = await checkHlsStreamHealthBatch(collectEventHlsUrls(event));
+    const [withHls] = applyHlsHealthResults([eventToCategory(event)], healthByUrl);
+    const [withYouTube] = await attachYouTubeHealth([withHls]);
+    return {
+      event: withYouTube.events[0],
+      healthUnavailable: false,
+    };
+  } catch {
+    const [degraded] = applyDegradedHlsHealth([eventToCategory(event)]);
+    const [withYouTube] = await attachYouTubeHealth([degraded]);
+    return {
+      event: withYouTube.events[0],
+      healthUnavailable: true,
+    };
+  }
+};
+
+export const checkEventHealth = async (
+  event: StreamEvent
+): Promise<{ event: StreamEvent; healthUnavailable: boolean }> => {
+  return applyHealthToEvent(event);
+};
+
+export const mergeEventIntoCategories = (
+  categories: StreamCategory[],
+  updatedEvent: StreamEvent
+): StreamCategory[] => {
+  return categories.map((category) => ({
+    ...category,
+    events: category.events.map((event) =>
+      event.id === updatedEvent.id ? updatedEvent : event
+    ),
+  }));
 };
 
 const applyHlsHealthResults = (
@@ -381,8 +488,16 @@ export const isEventPlayable = (event: StreamEvent): boolean => {
   return event.streams.some(isSourcePlayable);
 };
 
+export const isEventSelectable = (event: StreamEvent): boolean => {
+  return event.streams.some((source) => !source.hidden);
+};
+
 const getVisibleSources = (event: StreamEvent): StreamSource[] => {
   return event.streams.filter((source) => !source.hidden);
+};
+
+export const getFirstVisibleSource = (event: StreamEvent): StreamSource | null => {
+  return getVisibleSources(event)[0] ?? null;
 };
 
 export const getFirstPlayableSource = (event: StreamEvent): StreamSource | null => {

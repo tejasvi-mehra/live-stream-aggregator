@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StreamEvent, StreamSource, StreamCategory } from './types';
 import {
-  checkCatalogHealth,
+  checkEventHealth,
   filterCatalog,
   findEventById,
   findNextPlayableSourceInEvent,
+  getFeaturedEvent,
   getFirstPlayableSource,
+  getFirstVisibleSource,
   getVisibleEvents,
-  isEventPlayable,
   loadConfiguredCatalog,
+  mergeEventIntoCategories,
   getProfileMeta,
 } from './services/streamService';
 import { APP_NAME } from './constants';
@@ -19,9 +21,10 @@ import EventCard from './components/EventCard';
 const App: React.FC = () => {
   const [profile, setProfile] = useState(() => getProfileMeta());
   const [categories, setCategories] = useState<StreamCategory[]>([]);
+  const [featuredEventId, setFeaturedEventId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [healthUnavailable, setHealthUnavailable] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [openingEventId, setOpeningEventId] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<StreamEvent | null>(null);
   const [activeSource, setActiveSource] = useState<StreamSource | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -30,19 +33,18 @@ const App: React.FC = () => {
 
   const loadCatalog = useCallback(async (refresh = false) => {
     setLoading(true);
-    setHealthUnavailable(false);
     setCatalogError(null);
 
     try {
-      const { categories: configured, profile: loadedProfile } =
+      const { categories: configured, profile: loadedProfile, featuredEventId: loadedFeaturedEventId } =
         await loadConfiguredCatalog(refresh);
-      const result = await checkCatalogHealth(configured);
       setProfile(loadedProfile);
-      setCategories(result.categories);
-      setHealthUnavailable(result.healthUnavailable);
+      setCategories(configured);
+      setFeaturedEventId(loadedFeaturedEventId);
     } catch (error) {
       setCatalogError(error instanceof Error ? error.message : 'Failed to load catalog');
       setCategories([]);
+      setFeaturedEventId(null);
     } finally {
       setLoading(false);
     }
@@ -59,10 +61,10 @@ const App: React.FC = () => {
 
   const visibleEvents = useMemo(() => getVisibleEvents(categories), [categories]);
 
-  const featuredEvent = useMemo(() => {
-    const filteredEvents = filteredCategories.flatMap((category) => category.events);
-    return filteredEvents.find((event) => isEventPlayable(event)) ?? null;
-  }, [filteredCategories]);
+  const featuredEvent = useMemo(
+    () => getFeaturedEvent(categories, featuredEventId),
+    [categories, featuredEventId]
+  );
 
   const categoryFilters = useMemo(
     () => [
@@ -77,11 +79,23 @@ const App: React.FC = () => {
     setActiveSource(source);
   };
 
-  const handleEventSelect = (event: StreamEvent) => {
-    const firstPlayable = getFirstPlayableSource(event);
-    if (!firstPlayable) return;
-    syncActiveSource(event, firstPlayable);
-    setIsMinimized(false);
+  const handleEventSelect = async (event: StreamEvent) => {
+    if (openingEventId) return;
+
+    setOpeningEventId(event.id);
+    try {
+      const { event: checkedEvent } = await checkEventHealth(event);
+      setCategories((current) => mergeEventIntoCategories(current, checkedEvent));
+
+      const source =
+        getFirstPlayableSource(checkedEvent) ?? getFirstVisibleSource(checkedEvent);
+      if (!source) return;
+
+      syncActiveSource(checkedEvent, source);
+      setIsMinimized(false);
+    } finally {
+      setOpeningEventId(null);
+    }
   };
 
   const handleNextSource = () => {
@@ -112,8 +126,6 @@ const App: React.FC = () => {
     syncActiveSource(refreshedEvent, refreshedSource);
   };
 
-  const availableCount = visibleEvents.filter((event) => isEventPlayable(event)).length;
-
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col">
       <Header
@@ -136,14 +148,15 @@ const App: React.FC = () => {
               className="w-full h-full object-cover opacity-40"
             />
             <div className="absolute bottom-0 left-0 p-6 md:p-16 z-20 max-w-2xl">
-              <span className="bg-red-600 text-xs font-black px-2 py-1 rounded mb-4 inline-block tracking-tighter uppercase">
-                Live Now
+              <span className="bg-emerald-600 text-xs font-black px-2 py-1 rounded mb-4 inline-block tracking-tighter uppercase">
+                Featured
               </span>
               <h1 className="text-4xl md:text-5xl font-black mb-4 leading-none">{featuredEvent.name}</h1>
               <p className="text-slate-300 md:text-lg mb-6">{profile.description}</p>
               <button
                 onClick={() => handleEventSelect(featuredEvent)}
-                className="bg-emerald-500 text-black px-8 py-3 rounded-md font-bold text-lg flex items-center gap-2 hover:bg-emerald-400 transition-colors"
+                disabled={Boolean(openingEventId)}
+                className="bg-emerald-500 text-black px-8 py-3 rounded-md font-bold text-lg flex items-center gap-2 hover:bg-emerald-400 transition-colors disabled:opacity-60 disabled:cursor-wait"
               >
                 <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M8 5v14l11-7z" />
@@ -169,29 +182,13 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {healthUnavailable && !loading && !catalogError && (
-            <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border border-amber-700/50 bg-amber-950/40 px-4 py-3">
-              <p className="text-sm text-amber-100">
-                Could not verify stream availability. HLS events are playable but may fail until the backend responds.
-              </p>
-              <button
-                onClick={loadCatalog}
-                className="shrink-0 rounded-md bg-amber-600 px-4 py-2 text-sm font-bold text-black hover:bg-amber-500"
-              >
-                Retry connection
-              </button>
-            </div>
-          )}
-
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
             <div>
               <h2 className="text-2xl md:text-3xl font-black">Live Sports</h2>
               <p className="text-slate-500 mt-2">
                 {loading
-                  ? 'Checking stream availability...'
-                  : healthUnavailable
-                    ? `${availableCount} events playable (unverified HLS)`
-                    : `${availableCount}/${visibleEvents.length} events available`}
+                  ? 'Loading catalog...'
+                  : `${visibleEvents.length} events · availability checked when you play`}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -229,7 +226,12 @@ const App: React.FC = () => {
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-6 gap-y-10">
                     {category.events.length > 0 ? (
                       category.events.map((event) => (
-                        <EventCard key={event.id} event={event} onClick={handleEventSelect} />
+                        <EventCard
+                          key={event.id}
+                          event={event}
+                          isOpening={openingEventId === event.id}
+                          onClick={handleEventSelect}
+                        />
                       ))
                     ) : (
                       <p className="col-span-full text-slate-500 text-sm py-4">
@@ -256,6 +258,15 @@ const App: React.FC = () => {
           )}
         </div>
       </main>
+
+      {openingEventId && (
+        <div className="fixed inset-0 bg-black/60 z-40 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-500 mx-auto mb-4" />
+            <p className="text-slate-200 font-medium">Checking stream availability...</p>
+          </div>
+        </div>
+      )}
 
       {selectedEvent && activeSource && (
         <VideoPlayer

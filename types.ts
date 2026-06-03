@@ -19,6 +19,7 @@ export interface StreamEventConfig {
   id: string;
   name: string;
   logo: string;
+  featured?: boolean;
   streams: StreamSourceConfig[];
 }
 
@@ -67,6 +68,7 @@ export interface StreamEvent {
   id: string;
   name: string;
   logo: string;
+  featured?: boolean;
   categoryId: string;
   categoryName: string;
   streams: StreamSource[];

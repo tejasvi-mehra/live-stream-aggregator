@@ -80,6 +80,14 @@ profiles:
             streams:
               - url: https://kanal75xto-llhls.akamaized.net/live/Data/atg-kanal-15-02a-rr/HLS-Legacy-HL/atg-kanal-15-02a-rr.m3u8
 
+      - id: soccer
+        name: Soccer
+        events:
+          - id: soccer-live
+            name: Soccer Live Match
+            logo: https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Soccer_ball.svg/250px-Soccer_ball.svg.png
+            streams:
+              - url: https://africa24.vedge.infomaniak.com/livecast/ik:africa24sport/manifest.m3u8
 
       - id: motorsport
         name: Motorsport
@@ -107,6 +115,7 @@ profiles:
                     label: Main
           - id: motorsport
             name: RedBull Motorsport
+            featured: true
             logo: https://upload.wikimedia.org/wikipedia/commons/thumb/6/62/RED_BULL_LOGO_2026.svg/3840px-RED_BULL_LOGO_2026.svg.png
             streams:
               - url: https://play.redbull.com/streams/v1/rbtv/motor/ts/video/1280x720.m3u8
@@ -158,13 +167,3 @@ profiles:
             streams:
               - type: youtube
                 channelUrl: https://www.youtube.com/@Formula1
-
-
-      - id: soccer
-        name: Soccer
-        events:
-          - id: soccer-live
-            name: Soccer Live Match
-            logo: https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Soccer_ball.svg/250px-Soccer_ball.svg.png
-            streams:
-              - url: https://africa24.vedge.infomaniak.com/livecast/ik:africa24sport/manifest.m3u8

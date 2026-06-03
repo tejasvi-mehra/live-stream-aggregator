@@ -215,6 +215,7 @@ profiles:
 | `events[].id` | Event | Stable slug within the category |
 | `events[].name` | Event | Title on event cards and player |
 | `events[].logo` | Event | Image URL for cards and hero |
+| `events[].featured` | Event | Optional. First `featured: true` in YAML file order drives the homepage hero; later flags are ignored |
 | `streams[].url` | HLS (default type) | Direct `.m3u8` manifest URL at the origin |
 | `streams[].type` | Source | `hls` (default) or `youtube` |
 | `streams[].audio[]` | HLS | Optional separate audio-only manifests |
