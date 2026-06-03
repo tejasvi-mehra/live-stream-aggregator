@@ -7,6 +7,8 @@ export default defineConfig({
     environment: 'node',
     env: {
       VITE_API_BASE: 'http://localhost:3002',
+      // Keep catalog tests on the default GitHub raw URL even when .env points elsewhere.
+      VITE_CATALOG_URL: '',
     },
   },
 });

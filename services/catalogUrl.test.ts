@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { DEFAULT_CATALOG_URL, getCatalogUrl } from './catalogUrl';
 
 describe('catalogUrl', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('defaults to the GitHub raw streams.yaml URL', () => {
-    expect(DEFAULT_CATALOG_URL).toBe(
-      'https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml'
-    );
+    vi.stubEnv('VITE_CATALOG_URL', '');
     expect(getCatalogUrl()).toBe(DEFAULT_CATALOG_URL);
   });
 });

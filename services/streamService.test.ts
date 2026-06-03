@@ -7,7 +7,7 @@ import {
   loadConfiguredCatalog,
 } from './streamService';
 import { StreamCategory, StreamEvent, StreamSource } from '../types';
-import { DEFAULT_CATALOG_URL } from './catalogUrl';
+import { getCatalogUrl } from './catalogUrl';
 
 const sampleCatalogYaml = `
 activeProfile: production
@@ -54,11 +54,12 @@ const buildEvent = (streams: StreamSource[]): StreamEvent => ({
 
 describe('loadConfiguredCatalog', () => {
   beforeEach(() => {
+    vi.stubEnv('VITE_CATALOG_URL', '');
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url === DEFAULT_CATALOG_URL) {
+        if (url === getCatalogUrl()) {
           return new Response(sampleCatalogYaml, {
             status: 200,
             headers: { 'Content-Type': 'text/yaml' },
@@ -71,6 +72,7 @@ describe('loadConfiguredCatalog', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it('loads categories from the hosted YAML URL', async () => {
@@ -79,7 +81,7 @@ describe('loadConfiguredCatalog', () => {
     expect(result.profile.description).toBe('Test catalog');
     expect(result.categories[0].events[0].streams[0].url).toBe('https://example.com/a.m3u8');
     expect(fetch).toHaveBeenCalledWith(
-      DEFAULT_CATALOG_URL,
+      getCatalogUrl(),
       expect.objectContaining({ cache: 'no-store' })
     );
   });
