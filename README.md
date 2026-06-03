@@ -1,6 +1,6 @@
 # Live Stream Aggregator
 
-Sports live-stream aggregator built for the take-home assignment. It uses the same HLS.js player stack as `frontend/`, but loads a curated catalog from YAML instead of IPTV M3U playlists.
+Sports live-stream aggregator built for the take-home assignment. It uses the same HLS.js player stack as `frontend/`, but loads a curated catalog from hosted YAML (GitHub raw) instead of IPTV M3U playlists.
 
 Package name: `live-stream-aggregator`
 
@@ -63,6 +63,9 @@ VITE_API_BASE=http://localhost:3002
 Optional:
 
 ```bash
+# Override hosted catalog URL (defaults to raw GitHub streams.yaml on main)
+# VITE_CATALOG_URL=https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml
+
 # Disable all YouTube sources at build time (no UI toggle)
 VITE_YOUTUBE_ENABLED=false
 
@@ -72,7 +75,15 @@ VITE_STREAM_PROFILE=test
 
 ## Config structure
 
-Streams are defined in `config/streams.yaml` as **categories → events → streams**:
+The catalog lives in `config/streams.yaml` in this repo. At runtime the app **fetches** it from GitHub (no frontend redeploy needed when you edit streams):
+
+```
+https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml
+```
+
+Override with `VITE_CATALOG_URL` if you use a fork or branch. After editing YAML on GitHub, refresh the app (or click **Retry catalog**) — allow a minute for GitHub’s CDN cache to update.
+
+Streams are structured as **categories → events → streams**:
 
 ```yaml
 activeProfile: test
@@ -241,8 +252,9 @@ Visible sources (Akamai broadcaster HLS, Sofast FAST, YouTube channels) are like
 Production HLS URLs (including aggregator sources) change frequently. To update:
 
 1. Open the live event page or inspect network traffic for the current m3u8 URL
-2. Paste into `config/streams.yaml` under the relevant event in `profiles.production`
-3. Use `hidden: true` for backend-only sources that should not appear on the event card
+2. Edit `config/streams.yaml` on GitHub under the relevant event in `profiles.production` (commit to `main`)
+3. Refresh the deployed app — no Vercel redeploy required
+4. Use `hidden: true` for backend-only sources that should not appear on the event card
 
 For YouTube events, swap sample `channelUrl` values to the official live channel when the event is running.
 
@@ -259,7 +271,7 @@ For YouTube events, swap sample `channelUrl` values to the official live channel
 
 ## Trade-offs
 
-- **YAML over IPTV:** Predictable demo streams; manual URL updates for live games.
+- **YAML over IPTV:** Predictable demo streams; catalog fetched from GitHub at runtime so stream lists can change without redeploying the frontend.
 - **Apple HLS test profile:** Reliable ABR/latency testing without flaky live sources.
 - **YouTube iframe + optional Data API:** Playback stays embed; live detection uses scrape by default, Data API when configured.
 - **Server-side HLS health + proxy:** Backend batch-probes manifests without browser CORS limits; proxy rewrites m3u8 (including `#EXT-X-KEY` / `#EXT-X-MAP` URIs) and passes binary segments through unchanged
