@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { StreamEvent, StreamSource } from './types';
+import { StreamEvent, StreamSource, StreamCategory } from './types';
 import {
   checkCatalogHealth,
   filterCatalog,
@@ -17,24 +17,35 @@ import VideoPlayer from './components/VideoPlayer';
 import EventCard from './components/EventCard';
 
 const App: React.FC = () => {
-  const profile = getProfileMeta();
-  const [categories, setCategories] = useState(() => loadConfiguredCatalog());
+  const [profile, setProfile] = useState(() => getProfileMeta());
+  const [categories, setCategories] = useState<StreamCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [healthUnavailable, setHealthUnavailable] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<StreamEvent | null>(null);
   const [activeSource, setActiveSource] = useState<StreamSource | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
-  const loadCatalog = useCallback(async () => {
+  const loadCatalog = useCallback(async (refresh = false) => {
     setLoading(true);
     setHealthUnavailable(false);
-    const configured = loadConfiguredCatalog();
-    const result = await checkCatalogHealth(configured);
-    setCategories(result.categories);
-    setHealthUnavailable(result.healthUnavailable);
-    setLoading(false);
+    setCatalogError(null);
+
+    try {
+      const { categories: configured, profile: loadedProfile } =
+        await loadConfiguredCatalog(refresh);
+      const result = await checkCatalogHealth(configured);
+      setProfile(loadedProfile);
+      setCategories(result.categories);
+      setHealthUnavailable(result.healthUnavailable);
+    } catch (error) {
+      setCatalogError(error instanceof Error ? error.message : 'Failed to load catalog');
+      setCategories([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -144,7 +155,21 @@ const App: React.FC = () => {
         )}
 
         <div className={`px-6 md:px-16 ${featuredEvent && !searchQuery && selectedCategory === 'all' && !loading ? 'pt-12' : 'pt-24'}`}>
-          {healthUnavailable && !loading && (
+          {catalogError && !loading && (
+            <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border border-red-700/50 bg-red-950/40 px-4 py-3">
+              <p className="text-sm text-red-100">
+                Could not load stream catalog: {catalogError}
+              </p>
+              <button
+                onClick={() => loadCatalog(true)}
+                className="shrink-0 rounded-md bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500"
+              >
+                Retry catalog
+              </button>
+            </div>
+          )}
+
+          {healthUnavailable && !loading && !catalogError && (
             <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-lg border border-amber-700/50 bg-amber-950/40 px-4 py-3">
               <p className="text-sm text-amber-100">
                 Could not verify stream availability. HLS events are playable but may fail until the backend responds.

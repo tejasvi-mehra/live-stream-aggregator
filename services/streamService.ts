@@ -11,24 +11,63 @@ import {
 } from '../types';
 import { resolveYouTubeLive } from './youtubeService';
 import { apiUrl } from './apiBase';
-import streamsYaml from '../config/streams.yaml?raw';
-
-const config = yaml.load(streamsYaml) as StreamsConfig;
+import { getCatalogUrl } from './catalogUrl';
 
 const envProfile = import.meta.env.VITE_STREAM_PROFILE as 'test' | 'production' | undefined;
 
-const getActiveProfileKey = (): 'test' | 'production' => {
+let cachedConfig: StreamsConfig | null = null;
+
+const getActiveProfileKey = (config: StreamsConfig): 'test' | 'production' => {
   if (envProfile === 'test' || envProfile === 'production') {
     return envProfile;
   }
   return config.activeProfile;
 };
 
+export const fetchStreamsConfig = async (refresh = false): Promise<StreamsConfig> => {
+  if (cachedConfig && !refresh) {
+    return cachedConfig;
+  }
+
+  const response = await fetch(getCatalogUrl(), {
+    cache: 'no-store',
+    headers: {
+      Accept: 'text/yaml, text/plain, application/yaml, */*',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Catalog fetch failed: HTTP ${response.status}`);
+  }
+
+  const parsed = yaml.load(await response.text()) as StreamsConfig;
+  if (!parsed?.profiles) {
+    throw new Error('Invalid catalog YAML: missing profiles');
+  }
+
+  cachedConfig = parsed;
+  return parsed;
+};
+
+export interface LoadedCatalog {
+  categories: StreamCategory[];
+  profile: {
+    key: 'test' | 'production';
+    description: string;
+  };
+}
+
 export const getProfileMeta = () => {
-  const key = getActiveProfileKey();
+  if (!cachedConfig) {
+    const key =
+      envProfile === 'test' || envProfile === 'production' ? envProfile : 'production';
+    return { key, description: '' };
+  }
+
+  const key = getActiveProfileKey(cachedConfig);
   return {
     key,
-    description: config.profiles[key].description,
+    description: cachedConfig.profiles[key].description,
   };
 };
 
@@ -67,8 +106,8 @@ const stripYouTubeFromCatalog = (categories: StreamCategory[]): StreamCategory[]
   }));
 };
 
-export const loadConfiguredCatalog = (): StreamCategory[] => {
-  const profile = config.profiles[getActiveProfileKey()];
+const buildCategoriesFromConfig = (config: StreamsConfig): StreamCategory[] => {
+  const profile = config.profiles[getActiveProfileKey(config)];
 
   const categories = profile.categories.map((category) => ({
     id: category.id,
@@ -84,6 +123,19 @@ export const loadConfiguredCatalog = (): StreamCategory[] => {
   }));
 
   return isYouTubeDisabled() ? stripYouTubeFromCatalog(categories) : categories;
+};
+
+export const loadConfiguredCatalog = async (refresh = false): Promise<LoadedCatalog> => {
+  const config = await fetchStreamsConfig(refresh);
+  const key = getActiveProfileKey(config);
+
+  return {
+    categories: buildCategoriesFromConfig(config),
+    profile: {
+      key,
+      description: config.profiles[key].description,
+    },
+  };
 };
 
 const flattenEvents = (categories: StreamCategory[]): StreamEvent[] => {
