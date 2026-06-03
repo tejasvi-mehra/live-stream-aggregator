@@ -1,6 +1,5 @@
 # Override profile at runtime with VITE_STREAM_PROFILE=test|production
-# Default profile is production. Hidden HLS URLs below are public IPTV-style demo
-# feeds used to exercise proxy/failover — not private or owned live streams.
+# Default profile is production. Sources are public third-party HLS / YouTube URLs.
 activeProfile: production
 
 profiles:
@@ -123,7 +122,6 @@ profiles:
 
       - id: youtube
         name: YouTube Live Streams
-        # Sample channel handles for demo — swap to official league/broadcaster channels during live events
         events:
           - id: locked-on-nba
             name: Locked On NBA

@@ -1,60 +1,250 @@
 # Live Stream Aggregator
 
-Sports live-stream aggregator with a curated YAML catalog, HLS.js playback, YouTube live embeds, and a companion API for proxying, health checks, and live detection.
+A personal sports live-stream viewer: pick an event, switch sources, and watch in the browser. It aggregates a small curated set of public HLS and YouTube Live feeds in one UI — not a full-scale streaming platform, ingest pipeline, or CDN.
+
+**Live app:** https://live-stream-aggregator.vercel.app/
+
+**Backend API:** https://live-stream-aggregator-backend-production.up.railway.app/
+
+**Backend repo:** https://github.com/tejasvi-mehra/live-stream-aggregator-backend
 
 Package name: `live-stream-aggregator`
 
-## Running with backend
+---
 
-HLS playback and YouTube live detection work best with the sibling API server in `../live-stream-aggregator-backend` (Hono, port **3002**). It proxies HLS manifests/segments (fixes CORS), runs server-side health probes, and hosts the YouTube live scrape.
+## What it does
 
-**Two terminals:**
+- Loads a **YAML catalog** of sports categories, events, and stream sources (fetched from GitHub at runtime)
+- **HLS playback** via [hls.js](https://github.com/video-dev/hls.js/) through a backend proxy (CORS-safe, rewritten manifests)
+- **YouTube Live** via official iframe embeds; live detection runs on the backend
+- **Multi-source failover** — automatic and manual source switching within an event
+- **Separate audio tracks** — for origins that split video-only and audio-only HLS (e.g. Red Bull TV)
+- **Server-side health checks** before playback; adaptive bitrate (ABR) quality picker in the player
 
-```bash
-# Terminal 1 — backend
-cd ../live-stream-aggregator-backend
-npm install
-npm run dev
+Stream quality is the priority: fast startup, low rebuffering, clean ABR, and recovery when a source stalls or dies.
 
-# Terminal 2 — web app
-cd sports-streaming
-cp .env.example .env
-npm install
-npm run dev
+---
+
+## System design
+
+### High-level architecture
+
+```mermaid
+flowchart TB
+  subgraph user [Viewer browser]
+    UI[React catalog + player]
+    HlsJs[hls.js MSE player]
+    YTIframe[YouTube iframe]
+  end
+
+  subgraph vercel [Web app — Vercel]
+    Static[Static bundle + env]
+  end
+
+  subgraph railway [API — Railway]
+    Health["POST /api/hls/health/batch"]
+    Proxy["GET /api/hls/proxy"]
+    YTLive["GET /api/youtube/live"]
+  end
+
+  subgraph external [External]
+    GitHubYAML["GitHub raw streams.yaml"]
+    HLSOrigins[HLS origins / CDNs]
+    YouTube[YouTube]
+  end
+
+  UI --> Static
+  UI -->|fetch catalog| GitHubYAML
+  UI -->|startup health| Health
+  UI -->|live check| YTLive
+  HlsJs -->|manifest + TS segments| Proxy
+  Proxy --> HLSOrigins
+  Health --> HLSOrigins
+  YTLive --> YouTube
+  UI --> YTIframe
+  YTIframe --> YouTube
 ```
 
-`VITE_API_BASE` is **required**. The app fails at startup if it is missing. Copy `.env.example` → `.env` or use the npm scripts (they set `http://localhost:3002` by default).
+### Protocol choice: HTTP Live Streaming (HLS)
 
-See `../live-stream-aggregator-backend/README.md` for API details, security limits, and deploy notes.
+This app **passes through** existing HLS feeds — it does not ingest, transcode, or package video itself.
 
-## Quick start
+| Approach | Used here? | Why |
+|----------|------------|-----|
+| **HLS (M3U8 + TS/fMP4 segments)** | Yes | Widest browser support via MSE + hls.js; matches how most free sports CDNs and broadcasters deliver live video |
+| **LL-HLS** | Partially | Production player profile enables hls.js low-latency tuning where origins support it |
+| **DASH** | No | Fewer public sports sources expose MPD; adds player complexity for a personal tool |
+| **WebRTC** | No | Lower latency but needs a WebRTC-capable origin or media server — out of scope for aggregating public URLs |
 
-```bash
-npm install
-cp .env.example .env
-npm run dev               # production profile (default in streams.yaml)
-npm run dev:test          # Apple HLS sample streams only
-npm run dev:production    # explicit production profile
-npm run build             # requires VITE_API_BASE at build time
-npm run preview
-npm test                  # unit tests
+HLS works by repeatedly downloading a **playlist** (`.m3u8`) that lists **media segments** (`.ts` or fMP4). The player buffers a sliding window of segments, adapts bitrate from multiple renditions when available, and stays near the live edge.
+
+### How hls.js is used
+
+[hls.js](https://github.com/video-dev/hls.js/) (v1.6.16) runs in the browser:
+
+1. Fetches the manifest through the backend proxy URL
+2. Parses master / media playlists
+3. Downloads segments via `fetch` + Media Source Extensions (MSE)
+4. **ABR** — picks rendition based on bandwidth estimates (`abrEwmaDefaultEstimate`, band factors in `hlsConfig.ts`)
+5. **Recovery** — retries on network/media errors; escalates to the next YAML source after configured attempts
+6. **Safari fallback** — native HLS when `canPlayType('application/vnd.apple.mpegurl')` is true
+
+Production profile uses tighter buffers and `lowLatencyMode`; test profile uses Apple sample streams with conservative settings.
+
+### End-to-end: catalog load
+
+```mermaid
+sequenceDiagram
+  participant Browser
+  participant GitHub as GitHub raw YAML
+  participant API as Backend API
+  participant Origin as HLS origin
+
+  Browser->>GitHub: GET streams.yaml
+  GitHub-->>Browser: categories / events / urls
+  Browser->>API: POST /api/hls/health/batch { urls[] }
+  loop each manifest (+ optional audio url)
+    API->>Origin: GET m3u8 (+ probe first segment)
+    Origin-->>API: 200 + playlist / segment bytes
+  end
+  API-->>Browser: { results: reachable, latencyMs }
+  Browser->>API: GET /api/youtube/live?channelUrl=... (per YT source)
+  API-->>Browser: { isLive, channelId }
+  Browser->>Browser: Render event cards (live / offline)
 ```
 
-Open http://localhost:3001
+Playback URLs for HLS are rewritten to `https://live-stream-aggregator-backend-production.up.railway.app/api/hls/proxy?url=...` so all subsequent requests are same-origin from the browser’s perspective (relative to the API host).
 
-## Demo flow
+### End-to-end: HLS playback (data path)
 
-Suggested order when showing the app:
+```mermaid
+sequenceDiagram
+  participant User
+  participant hls.js
+  participant Proxy as /api/hls/proxy
+  participant CDN as Upstream CDN
 
-1. Start the **backend** on port 3002, then the **web app** with `VITE_API_BASE` set.
-2. Open **FIBA 3x3** (Akamai HLS) or **Cricket Gold** (Sofast) first — stable public feeds, shows ABR and proxy playback.
-3. Open **Red Bull Padel** — second HLS origin, shows source switching and split audio.
-4. Try **Basketball / NFL / Soccer IPTV** samples to demonstrate failover or public-feed proxying — these are public demo URLs, not owned streams.
-5. Open **YouTube** events when the channel is live; swap YAML handles to official broadcaster channels as needed.
+  User->>hls.js: Play event / source
+  hls.js->>Proxy: GET proxy?url=master.m3u8
+  Proxy->>CDN: GET origin master.m3u8
+  CDN-->>Proxy: playlist text
+  Proxy-->>hls.js: rewritten m3u8 (all URIs → proxy URLs)
+  hls.js->>Proxy: GET proxy?url=variant.m3u8
+  Proxy->>CDN: GET variant playlist
+  CDN-->>Proxy: media playlist (#EXTINF segments)
+  Proxy-->>hls.js: rewritten media playlist
+  loop each segment
+    hls.js->>Proxy: GET proxy?url=segment.ts
+    Proxy->>CDN: GET segment (binary passthrough)
+    CDN-->>Proxy: MPEG-TS / fMP4 bytes
+    Proxy-->>hls.js: segment body unchanged
+    hls.js->>User: appendBuffer → video frame
+  end
+```
 
-If the amber **Unverified** banner appears, click **Retry connection** after the backend is up.
+The proxy **rewrites** playlist lines (`#EXT-X-STREAM-INF`, `#EXT-X-KEY`, `#EXT-X-MAP`, segment URIs) so hls.js never talks to third-party origins directly. **Segments** are fetched with `arrayBuffer()` and returned without text decoding — binary-safe for TS.
 
-Required env (copy `.env.example` → `.env`):
+### YouTube Live path
+
+YouTube is **not** restreamed as HLS. The backend answers “is this channel live?”; the web app embeds:
+
+`https://www.youtube.com/embed/live_stream?channel=CHANNEL_ID`
+
+### Split audio (Red Bull-style)
+
+Some origins expose **video-only** and **audio-only** HLS playlists. The player runs **two** hls.js instances: `<video>` (muted) + hidden `<audio>`. Basic drift sync nudges `audio.currentTime` toward `video.currentTime` on play/seek/timeupdate (~350ms threshold). Broadcast-grade A/V lock (PDT/PCR) is not implemented.
+
+---
+
+## Stream catalog (`streams.yaml`)
+
+Source of truth: [`config/streams.yaml`](config/streams.yaml) in this repo.
+
+At runtime the app fetches:
+
+https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml
+
+Override with `VITE_CATALOG_URL`. After editing on GitHub, refresh the app (or **Retry catalog**); allow ~1 minute for GitHub CDN cache.
+
+### Top-level shape
+
+```yaml
+activeProfile: production   # default profile when VITE_STREAM_PROFILE unset
+
+profiles:
+  test:
+    description: ...
+    categories: [...]
+  production:
+    description: ...
+    categories: [...]
+```
+
+### Category → event → stream hierarchy
+
+```yaml
+profiles:
+  production:
+    categories:
+      - id: basketball          # slug for filters
+        name: Basketball        # display name
+        events:
+          - id: fiba-world-2026
+            name: FIBA 3x3 World Tour 2026
+            logo: https://...   # event card image URL
+            streams:
+              - url: https://cdn.example.com/live/master.m3u8
+              - url: https://cdn.example.com/live/backup.m3u8
+              - type: youtube
+                channelUrl: https://www.youtube.com/@ChannelHandle
+                channelId: UC...   # optional; resolved if omitted
+              - url: https://play.redbull.com/.../video/1280x720.m3u8
+                audio:
+                  - url: https://play.redbull.com/.../audio/en.m3u8
+                    label: Main
+```
+
+### Field reference
+
+| Field | Applies to | Description |
+|-------|------------|-------------|
+| `activeProfile` | Root | `test` or `production` — which profile loads by default |
+| `profiles.*.description` | Profile | Shown in the hero / profile meta |
+| `categories[].id` | Category | Stable slug (`basketball`, `soccer`, …) |
+| `categories[].name` | Category | Display label |
+| `events[].id` | Event | Stable slug within the category |
+| `events[].name` | Event | Title on event cards and player |
+| `events[].logo` | Event | Image URL for cards and hero |
+| `streams[].url` | HLS (default type) | Direct `.m3u8` manifest URL at the origin |
+| `streams[].type` | Source | `hls` (default) or `youtube` |
+| `streams[].audio[]` | HLS | Optional separate audio-only manifests |
+| `streams[].audio[].url` | HLS | Audio m3u8 URL |
+| `streams[].audio[].label` | HLS | Label in the audio switcher (e.g. `Main`) |
+| `streams[].channelUrl` | YouTube | Channel page (`/@handle`, `/channel/UC…`, `/user/name`) |
+| `streams[].channelId` | YouTube | Optional `UC…` ID; backend can resolve from URL |
+
+### Profiles
+
+| Profile | Purpose |
+|---------|---------|
+| `test` | Apple HLS sample streams across all sports — stable ABR/latency testing |
+| `production` | Curated mix of public HLS, YouTube, and multi-bitrate sources (default) |
+
+Switch via `activeProfile` in YAML or `VITE_STREAM_PROFILE=test|production`.
+
+---
+
+## Configuration
+
+`VITE_API_BASE` is **required** — the app fails at startup if unset.
+
+**Production:**
+
+```bash
+VITE_API_BASE=https://live-stream-aggregator-backend-production.up.railway.app
+```
+
+**Local development** (with backend running on port 3002):
 
 ```bash
 VITE_API_BASE=http://localhost:3002
@@ -63,227 +253,111 @@ VITE_API_BASE=http://localhost:3002
 Optional:
 
 ```bash
-# Override hosted catalog URL (defaults to raw GitHub streams.yaml on main)
-# VITE_CATALOG_URL=https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml
+# Hosted catalog (defaults to GitHub raw streams.yaml on main)
+VITE_CATALOG_URL=https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml
 
-# Disable all YouTube sources at build time (no UI toggle)
+# Strip all YouTube sources at build time
 VITE_YOUTUBE_ENABLED=false
 
-# Override YAML activeProfile without editing streams.yaml
+# Override active profile without editing YAML
 VITE_STREAM_PROFILE=test
 ```
 
-## Config structure
+See [backend README — Environment](https://github.com/tejasvi-mehra/live-stream-aggregator-backend/blob/main/README.md) for API-side variables (`CORS_ORIGIN`, `PUBLIC_API_BASE`, `PROXY_ALLOWLIST`, YouTube detection).
 
-The catalog lives in `config/streams.yaml` in this repo. At runtime the app **fetches** it from GitHub (no app redeploy needed when you edit streams):
+---
 
-```
-https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml
-```
+## Local development
 
-Override with `VITE_CATALOG_URL` if you use a fork or branch. After editing YAML on GitHub, refresh the app (or click **Retry catalog**) — allow a minute for GitHub’s CDN cache to update.
+**Terminal 1 — API**
 
-Streams are structured as **categories → events → streams**:
-
-```yaml
-activeProfile: test
-
-profiles:
-  test:
-    description: Apple HLS sample streams for development and QA.
-    categories:
-      - id: basketball
-        name: Basketball
-        events:
-          - id: demo-basketball
-            name: Demo Basketball
-            logo: https://example.com/logo.png
-            streams:
-              - url: https://example.com/stream/master.m3u8
-              - url: https://example.com/stream/backup.m3u8
-              - type: youtube
-                channelUrl: https://www.youtube.com/@ChannelHandle
+```bash
+git clone https://github.com/tejasvi-mehra/live-stream-aggregator-backend.git
+cd live-stream-aggregator-backend
+cp .env.example .env
+npm install
+npm run dev
 ```
 
-### Stream fields
+**Terminal 2 — web app**
 
-| Field | Applies to | Description |
-|-------|------------|-------------|
-| `url` | HLS (default) | Direct m3u8 manifest URL |
-| `audio` | HLS | Optional list of separate audio-only m3u8 URLs (e.g. Red Bull TV video/audio split) |
-| `audio[].label` | HLS | Optional label shown in the player audio switcher |
-| `type: youtube` | YouTube | Marks source as a YouTube channel |
-| `channelUrl` | YouTube | Channel page (`/channel/UC...`, `/@handle`, `/user/name`) |
-| `channelId` | YouTube | Optional `UC...` ID; resolved automatically when omitted |
-| `hidden: true` | Any | Backend-only source — used for playback/failover, not shown on event cards |
-
-### Profiles
-
-| Profile | Purpose | Contents |
-|---------|---------|----------|
-| `test` | Development / QA | Apple HLS demo streams only — same two manifests shared across all sports, no YouTube, no hidden sources |
-| `production` | Live demo (**default**) | Curated mix of HLS, YouTube, and hidden public IPTV demo sources across basketball, cricket, football, motorsport, and soccer |
-
-Example — Red Bull TV split manifests:
-
-```yaml
-streams:
-  - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/video/1280x720.m3u8
-    audio:
-      - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/audio/main.m3u8
-        label: Main
+```bash
+git clone https://github.com/tejasvi-mehra/live-stream-aggregator.git
+cd live-stream-aggregator
+cp .env.example .env
+npm install
+npm run dev
 ```
 
-Switch profiles via `activeProfile` in YAML or `VITE_STREAM_PROFILE=test|production`.
+Open http://localhost:3001
 
-## Features
-
-### Catalog and UI
-
-- Events grouped by sport category (alphabetically)
-- Search and category filter pills
-- Event cards show live/offline status, source count, and YouTube badge when applicable
-- Empty sport categories are still shown with a “No events for this category” message when filtered down to zero events
-
-### Multi-source playback
-
-Each event can have multiple sources. The player footer shows clickable source links:
-
-- HLS sources → **Source 1**, **Source 2**, …
-- YouTube sources → **YouTube 1**, **YouTube 2**, …
-
-Numbering is per type and includes hidden backend sources in order.
-
-**Next / Prev** cycles playable sources within the same event only (not across events).
-
-**Failover:** on a fatal HLS error, the player automatically tries the next playable source in YAML order.
-
-**Separate audio (Red Bull TV):** some origins publish video-only and audio-only HLS manifests. Add an `audio` list on the video source; the player loads video on `<video>` and audio on a second HLS instance, with basic drift correction (~350ms threshold). The footer shows an **Audio** switcher when multiple audio tracks exist across the event, and audio failover tries the next configured track or another source’s audio.
-
-**Hidden sources** (e.g. backend HLS URLs in production) are not listed on event cards but participate in playback, failover, and source numbering.
-
-### HLS player
-
-- HLS.js with `lowLatencyMode`, Safari native HLS fallback
-- ABR quality selector, picture-in-picture, volume/mute persistence
-- Auto-play next source toggle
-
-### YouTube live streams
-
-YouTube entries in `profiles.production` are **sample channel handles** (podcast/show accounts). Swap `channelUrl` / `channelId` to official league or broadcaster channels when those events are actually live.
-
-Add a YouTube source to any event:
-
-```yaml
-- type: youtube
-  channelUrl: https://www.youtube.com/@NFL
+```bash
+npm run dev:test          # Apple HLS samples only
+npm run dev:production    # explicit production profile
+npm run build
+npm run test
 ```
 
-On load the app calls `/api/youtube/live` to detect whether the channel is live. **Playback always uses the channel live iframe embed** — never HLS restream.
+---
 
-Backend live detection modes (see backend `.env.example`):
+## Resilience behavior
 
-| Mode | Behavior |
-|------|----------|
-| Default (no API key) | HTML scrape of channel `/live` page |
-| `YOUTUBE_LIVE_METHOD=auto` + API key | Data API first; scrape fallback on errors |
-| `YOUTUBE_LIVE_METHOD=data_api` | Data API only (requires key) |
-| `YOUTUBE_LIVE_METHOD=scrape` | Force scrape even if API key is set |
+| Scenario | Behavior |
+|----------|----------|
+| Fatal HLS network/media error | Exponential backoff retry, then failover to next playable source in YAML order |
+| Buffer stall | Stall timer → recover media / restart load |
+| Backend health batch fails | Degraded mode: sources marked unverified but still attempt playback |
+| Catalog fetch fails | Error banner + **Retry catalog** |
+| YouTube channel offline | Event shows “Not live”; player not offered |
 
-Embed URL: `https://www.youtube.com/embed/live_stream?channel=CHANNEL_ID`
-
-**Kill switch:** set `VITE_YOUTUBE_ENABLED=false` in `.env` to strip all YouTube sources at build time.
-
-### Health checks
-
-On app load, the catalog runs reachability checks:
-
-- **HLS:** catalog startup uses `POST /api/hls/health/batch` for all manifest URLs in one round trip; playback URLs are rewritten through `/api/hls/proxy`
-- **YouTube:** calls the backend live check described above
-
-Events are clickable only when at least one source is playable.
+---
 
 ## Project layout
 
 ```
 live-stream-aggregator/
-├── config/streams.yaml      # Catalog profiles
+├── config/streams.yaml
+├── hlsConfig.ts              # hls.js + recovery tuning per profile
 ├── services/
-│   ├── apiBase.ts           # VITE_API_BASE helpers
-│   ├── streamService.ts     # YAML load, health checks, failover, HLS proxy URLs
-│   └── youtubeService.ts    # YouTube live client + embed URL builder
+│   ├── apiBase.ts
+│   ├── catalogUrl.ts
+│   ├── streamService.ts      # catalog, health, failover
+│   ├── audioTracks.ts        # split-audio helpers
+│   └── youtubeService.ts
 ├── components/
-│   ├── EventCard.tsx        # Event tile with status badges
-│   ├── VideoPlayer.tsx      # HLS player with failover
-│   ├── YouTubePlayer.tsx    # YouTube channel live embed
-│   ├── SourceSwitcher.tsx   # Multi-source footer links
-│   ├── AudioSwitcher.tsx    # Separate audio track links
-│   └── ...
+│   ├── VideoPlayer.tsx       # hls.js + dual audio
+│   ├── YouTubePlayer.tsx
+│   ├── SourceSwitcher.tsx
+│   ├── AudioSwitcher.tsx
+│   └── EventCard.tsx
+└── ...
 ```
 
-## Architecture
-
-```mermaid
-flowchart LR
-  subgraph browser [Browser :3001]
-    App[React App]
-    HlsJs[hls.js]
-    YTIframe[YouTube iframe]
-  end
-  subgraph backend [Backend :3002]
-    Health["/api/hls/health"]
-    Proxy["/api/hls/proxy"]
-    YTLive["/api/youtube/live"]
-  end
-  App --> Health
-  App --> YTLive
-  HlsJs --> Proxy
-  App --> YTIframe
-```
-
-- **HLS:** hls.js loads manifests and segments through `/api/hls/proxy`
-- **YouTube:** backend checks live status; the client embeds `live_stream?channel=...`
-- **Catalog:** fetched from hosted YAML at startup, with server-side health probes before playback
-
-## Production stream sources (important)
-
-Hidden HLS URLs in `profiles.production` (e.g. `http://23.237.104.106:8080/...`) are **public IPTV-style live streams** included **only to demonstrate** proxy playback, multi-source failover, and health checks. They are:
-
-- **Not** private, owned, or exclusive feeds
-- **Not** guaranteed to be live, stable, or high quality
-- Manually curated for product demo purposes, similar to public M3U lists
-
-Visible sources (Akamai broadcaster HLS, Sofast FAST, YouTube channels) are likewise chosen to show the aggregator UX — not to claim rights to any particular game feed.
-
-## Updating production streams
-
-Production HLS URLs (including aggregator sources) change frequently. To update:
-
-1. Open the live event page or inspect network traffic for the current m3u8 URL
-2. Edit `config/streams.yaml` on GitHub under the relevant event in `profiles.production` (commit to `main`)
-3. Refresh the deployed app — no Vercel redeploy required
-4. Use `hidden: true` for backend-only sources that should not appear on the event card
-
-For YouTube events, swap sample `channelUrl` values to the official live channel when the event is running.
-
-## Costs
-
-**$0** for the default setup — free IPTV HLS URLs, optional YouTube HTML scrape, no managed streaming services. The optional YouTube Data API stays within free quota for typical demo traffic.
-
-## Next steps
-
-1. Proxy segment passthrough via `ReadableStream` instead of buffering full TS files in Node.
-2. Mid-playback health re-check for long IPTV sessions.
-3. Prefetch the next source manifest on source switch.
-4. Lead the live demo from stable HLS cards (FIBA Akamai, Sofast, Red Bull) before IPTV samples.
-5. **Separate-audio sync:** align video/audio using `#EXT-X-PROGRAM-DATE-TIME` or MPEG-TS PCR instead of periodic `currentTime` nudges — current approach is good enough for short demos but can drift on long sessions or after buffer stalls.
+---
 
 ## Trade-offs
 
-- **YAML catalog:** Predictable stream lists; catalog fetched from GitHub at runtime so sources can change without redeploying the app.
-- **Apple HLS test profile:** Reliable ABR/latency testing without flaky live sources.
-- **YouTube iframe + optional Data API:** Playback stays embed; live detection uses scrape by default, Data API when configured.
-- **Separate audio tracks:** Red Bull-style split manifests use dual HLS players with lightweight `currentTime` sync, not broadcast-grade A/V lock.
-- **Server-side HLS health + proxy:** Backend batch-probes manifests without browser CORS limits; proxy rewrites m3u8 (including `#EXT-X-KEY` / `#EXT-X-MAP` URIs) and passes binary segments through unchanged
-- **Required API base:** The app refuses to boot without `VITE_API_BASE` so playback always goes through the backend proxy path
-- **Hidden sources:** Keeps backup URLs off the UI while still enabling failover within an event.
+| Decision | Rationale |
+|----------|-----------|
+| **HLS pass-through + proxy** | No transcoding cost; fixes CORS and centralizes SSRF controls on the API |
+| **YAML catalog on GitHub** | Edit stream list without redeploying Vercel |
+| **hls.js over native-only** | Consistent behavior across Chrome/Firefox; ABR + error hooks |
+| **YouTube iframe only** | Avoids ToS-violating restream; simple live detection on API |
+| **Thin API, no media server** | Appropriate for personal use — not built to scale to many concurrent viewers |
+| **Dual-player split audio** | Works with Red Bull-style origins; sync is best-effort, not broadcast-grade |
+
+---
+
+## Possible improvements
+
+- PDT/PCR-based A/V sync for split audio
+- Mid-playback health re-check for long sessions
+- Prefetch next source manifest on source switch
+- Proxy segment streaming via `ReadableStream` instead of buffering full TS in Node
+- Move catalog + health into a single API response
+
+---
+
+## Costs
+
+**$0** default — public HLS URLs, optional YouTube HTML scrape, Vercel + Railway free tiers. Optional YouTube Data API stays within free quota at personal traffic levels.
