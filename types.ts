@@ -1,12 +1,18 @@
 
 export type StreamType = 'hls' | 'youtube';
 
+export interface StreamAudioTrackConfig {
+  url: string;
+  label?: string;
+}
+
 export interface StreamSourceConfig {
   type?: StreamType;
   url?: string;
   channelUrl?: string;
   channelId?: string;
   hidden?: boolean;
+  audio?: StreamAudioTrackConfig[];
 }
 
 export interface StreamEventConfig {
@@ -35,6 +41,14 @@ export interface StreamsConfig {
   };
 }
 
+export interface StreamAudioTrack {
+  id: string;
+  url: string;
+  label?: string;
+  playbackUrl?: string;
+  status?: StreamHealthStatus;
+}
+
 export interface StreamSource {
   id: string;
   eventId: string;
@@ -43,6 +57,7 @@ export interface StreamSource {
   channelUrl?: string;
   channelId?: string;
   hidden: boolean;
+  audioTracks?: StreamAudioTrack[];
   playbackUrl?: string;
   status?: StreamHealthStatus;
   liveTitle?: string;

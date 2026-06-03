@@ -1,8 +1,15 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Hls, { ErrorDetails, ErrorTypes, Events } from 'hls.js';
-import { StreamEvent, StreamSource } from '../types';
+import { StreamEvent, StreamSource, StreamAudioTrack } from '../types';
 import { findFailoverSource, getStreamPlaybackUrl } from '../services/streamService';
+import {
+  findAudioTrackById,
+  findFailoverAudioTrack,
+  getAudioPlaybackUrl,
+  getFirstPlayableAudioTrack,
+  sourceUsesSeparateAudio,
+} from '../services/audioTracks';
 import {
   getHlsConfig,
   getRecoveryConfig,
@@ -12,6 +19,9 @@ import { getProfileMeta } from '../services/streamService';
 import YouTubePlayer from './YouTubePlayer';
 import PlayerNavButtons from './PlayerNavButtons';
 import SourceSwitcher from './SourceSwitcher';
+import AudioSwitcher from './AudioSwitcher';
+
+const AUDIO_SYNC_THRESHOLD_SEC = 0.35;
 
 interface QualityLevel {
   index: number;
@@ -48,10 +58,14 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   onSelectSource,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const audioHlsRef = useRef<Hls | null>(null);
   const prevSourceIdRef = useRef<string | null>(null);
   const recoverAttemptsRef = useRef(0);
+  const audioRecoverAttemptsRef = useRef(0);
   const recoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const audioRecoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,6 +95,22 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isMuted, setIsMuted] = useState<boolean>(() => {
     return localStorage.getItem(MUTED_KEY) === 'true';
   });
+  const [activeAudioTrackId, setActiveAudioTrackId] = useState<string | null>(() => {
+    return getFirstPlayableAudioTrack(activeStream)?.id ?? activeStream.audioTracks?.[0]?.id ?? null;
+  });
+  const usesSeparateAudio = sourceUsesSeparateAudio(activeStream);
+  const activeAudioTrack = useMemo(() => {
+    if (activeAudioTrackId) {
+      return findAudioTrackById(event, activeAudioTrackId) ?? getFirstPlayableAudioTrack(activeStream);
+    }
+    return getFirstPlayableAudioTrack(activeStream);
+  }, [activeAudioTrackId, activeStream, event]);
+
+  useEffect(() => {
+    const firstTrack =
+      getFirstPlayableAudioTrack(activeStream) ?? activeStream.audioTracks?.[0] ?? null;
+    setActiveAudioTrackId(firstTrack?.id ?? null);
+  }, [activeStream.id]);
 
   const handleVolumeChange = (newVolume: number) => {
     const clampedVolume = Math.max(0, Math.min(1, newVolume));
@@ -90,12 +120,18 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
     if (videoRef.current) {
       videoRef.current.volume = clampedVolume;
     }
+    if (audioRef.current) {
+      audioRef.current.volume = clampedVolume;
+    }
 
     if (clampedVolume > 0 && isMuted) {
       setIsMuted(false);
       localStorage.setItem(MUTED_KEY, 'false');
       if (videoRef.current) {
         videoRef.current.muted = false;
+      }
+      if (audioRef.current) {
+        audioRef.current.muted = false;
       }
     }
   };
@@ -107,6 +143,9 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
     if (videoRef.current) {
       videoRef.current.muted = newState;
     }
+    if (audioRef.current) {
+      audioRef.current.muted = newState;
+    }
   };
 
   const toggleAutoPlay = () => {
@@ -117,10 +156,177 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
 
   useEffect(() => {
     const video = videoRef.current;
+    const audio = audioRef.current;
     if (!video) return;
+
+    if (usesSeparateAudio && audio) {
+      video.muted = true;
+      audio.volume = volume;
+      audio.muted = isMuted;
+      return;
+    }
+
     video.volume = volume;
     video.muted = isMuted;
-  }, [volume, isMuted]);
+  }, [volume, isMuted, usesSeparateAudio, activeStream.id]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const audio = audioRef.current;
+    if (!video || !audio || !usesSeparateAudio || !activeAudioTrack) {
+      return;
+    }
+
+    const syncAudioToVideo = (force = false) => {
+      const drift = Math.abs(audio.currentTime - video.currentTime);
+      if (force || drift > AUDIO_SYNC_THRESHOLD_SEC) {
+        audio.currentTime = video.currentTime;
+      }
+    };
+
+    const handleVideoPlay = () => {
+      syncAudioToVideo(true);
+      audio.play().catch(() => undefined);
+    };
+    const handleVideoPause = () => {
+      audio.pause();
+    };
+    const handleVideoSeeking = () => {
+      syncAudioToVideo(true);
+    };
+    const handleVideoTimeUpdate = () => {
+      syncAudioToVideo(false);
+    };
+
+    video.addEventListener('play', handleVideoPlay);
+    video.addEventListener('pause', handleVideoPause);
+    video.addEventListener('seeking', handleVideoSeeking);
+    video.addEventListener('timeupdate', handleVideoTimeUpdate);
+
+    return () => {
+      video.removeEventListener('play', handleVideoPlay);
+      video.removeEventListener('pause', handleVideoPause);
+      video.removeEventListener('seeking', handleVideoSeeking);
+      video.removeEventListener('timeupdate', handleVideoTimeUpdate);
+    };
+  }, [usesSeparateAudio, activeStream.id, activeAudioTrack?.id]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    const playbackUrl = activeAudioTrack ? getAudioPlaybackUrl(activeAudioTrack) : undefined;
+    if (!audio || !playbackUrl || !usesSeparateAudio) {
+      if (audioHlsRef.current) {
+        audioHlsRef.current.destroy();
+        audioHlsRef.current = null;
+      }
+      return;
+    }
+
+    audioRecoverAttemptsRef.current = 0;
+
+    const clearAudioRecoveryTimers = () => {
+      if (audioRecoverTimerRef.current) {
+        clearTimeout(audioRecoverTimerRef.current);
+        audioRecoverTimerRef.current = null;
+      }
+    };
+
+    const failOrFailoverAudio = () => {
+      clearAudioRecoveryTimers();
+      const currentTrackId = activeAudioTrack.id;
+      const fallback = findFailoverAudioTrack(eventRef.current, activeStream, currentTrackId);
+      if (fallback && fallback.id !== currentTrackId) {
+        setActiveAudioTrackId(fallback.id);
+        return;
+      }
+    };
+
+    const scheduleAudioRecover = (recover: () => void) => {
+      audioRecoverAttemptsRef.current += 1;
+      if (shouldFailoverAfterAttempt(audioRecoverAttemptsRef.current, recoveryConfig.maxAttempts)) {
+        failOrFailoverAudio();
+        return;
+      }
+
+      const delay = recoveryConfig.baseDelayMs * 2 ** (audioRecoverAttemptsRef.current - 1);
+      clearAudioRecoveryTimers();
+      audioRecoverTimerRef.current = setTimeout(() => {
+        recover();
+        audio.play().catch(() => undefined);
+      }, delay);
+    };
+
+    if (audioHlsRef.current) {
+      audioHlsRef.current.destroy();
+      audioHlsRef.current = null;
+    }
+
+    if (Hls.isSupported()) {
+      const audioHls = new Hls(hlsConfig);
+      audioHlsRef.current = audioHls;
+      audioHls.loadSource(playbackUrl);
+      audioHls.attachMedia(audio);
+
+      audioHls.on(Events.MANIFEST_PARSED, () => {
+        const video = videoRef.current;
+        if (video && !video.paused) {
+          audio.currentTime = video.currentTime;
+          audio.play().catch(() => undefined);
+        }
+      });
+
+      audioHls.on(Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case ErrorTypes.NETWORK_ERROR:
+              scheduleAudioRecover(() => audioHls.startLoad());
+              return;
+            case ErrorTypes.MEDIA_ERROR:
+              scheduleAudioRecover(() => audioHls.recoverMediaError());
+              return;
+            default:
+              failOrFailoverAudio();
+              return;
+          }
+        }
+      });
+
+      return () => {
+        clearAudioRecoveryTimers();
+        audioHls.destroy();
+        audioHlsRef.current = null;
+      };
+    }
+
+    if (audio.canPlayType('application/vnd.apple.mpegurl')) {
+      audio.src = playbackUrl;
+      const onMetadata = () => {
+        const video = videoRef.current;
+        if (video) {
+          audio.currentTime = video.currentTime;
+        }
+        if (video && !video.paused) {
+          audio.play().catch(() => undefined);
+        }
+      };
+      audio.addEventListener('loadedmetadata', onMetadata);
+      return () => {
+        audio.removeEventListener('loadedmetadata', onMetadata);
+        clearAudioRecoveryTimers();
+      };
+    }
+
+    return () => {
+      clearAudioRecoveryTimers();
+    };
+  }, [
+    activeAudioTrack?.id,
+    activeAudioTrack?.playbackUrl,
+    activeStream.id,
+    hlsConfig,
+    recoveryConfig,
+    usesSeparateAudio,
+  ]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -134,6 +340,10 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
+    }
+
+    if (usesSeparateAudio) {
+      video.muted = true;
     }
 
     setLoading(true);
@@ -323,7 +533,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
       video.removeEventListener('ended', handleEnded);
       clearRecoveryTimers();
     };
-  }, [activeStream.id, activeStream.playbackUrl, activeStream.url, autoPlayNext, hlsConfig, profileKey, recoveryConfig]);
+  }, [activeStream.id, activeStream.playbackUrl, activeStream.url, autoPlayNext, hlsConfig, profileKey, recoveryConfig, usesSeparateAudio]);
 
   const togglePip = async () => {
     if (!videoRef.current) return;
@@ -447,7 +657,9 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
               className={`absolute inset-0 w-full h-full object-contain ${isPipActive ? 'opacity-50' : ''}`}
               autoPlay
               playsInline
+              muted={usesSeparateAudio ? true : isMuted}
             />
+            <audio ref={audioRef} className="hidden" playsInline />
 
             {!isMinimized && (
               <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
@@ -562,6 +774,15 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
                   event={event}
                   activeStream={activeStream}
                   onSelectSource={onSelectSource}
+                />
+                <AudioSwitcher
+                  event={event}
+                  activeTrackId={activeAudioTrack?.id ?? null}
+                  onSelectTrack={(track: StreamAudioTrack) => {
+                    if (track.id !== activeAudioTrack?.id) {
+                      setActiveAudioTrackId(track.id);
+                    }
+                  }}
                 />
               </div>
             </div>

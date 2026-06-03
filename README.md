@@ -110,6 +110,8 @@ profiles:
 | Field | Applies to | Description |
 |-------|------------|-------------|
 | `url` | HLS (default) | Direct m3u8 manifest URL |
+| `audio` | HLS | Optional list of separate audio-only m3u8 URLs (e.g. Red Bull TV video/audio split) |
+| `audio[].label` | HLS | Optional label shown in the player audio switcher |
 | `type: youtube` | YouTube | Marks source as a YouTube channel |
 | `channelUrl` | YouTube | Channel page (`/channel/UC...`, `/@handle`, `/user/name`) |
 | `channelId` | YouTube | Optional `UC...` ID; resolved automatically when omitted |
@@ -145,6 +147,8 @@ Numbering is per type and includes hidden backend sources in order.
 **Next / Prev** cycles playable sources within the same event only (not across events).
 
 **Failover:** on a fatal HLS error, the player automatically tries the next playable source in YAML order.
+
+**Separate audio (Red Bull TV):** some origins publish video-only and audio-only HLS manifests. Add an `audio` list on the video source; the player loads video on `<video>` and audio on a second HLS instance, with basic drift correction (~350ms threshold). The footer shows an **Audio** switcher when multiple audio tracks exist across the event, and audio failover tries the next configured track or another source’s audio.
 
 **Hidden sources** (e.g. backend HLS URLs in production) are not listed on event cards but participate in playback, failover, and source numbering.
 
@@ -262,18 +266,30 @@ For YouTube events, swap sample `channelUrl` values to the official live channel
 
 **$0** for the default setup — free IPTV HLS URLs, optional YouTube HTML scrape, no managed streaming services. The optional YouTube Data API stays within free quota for demo traffic.
 
+Example — Red Bull TV split manifests:
+
+```yaml
+streams:
+  - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/video/1280x720.m3u8
+    audio:
+      - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/audio/main.m3u8
+        label: Main
+```
+
 ## Next steps (with more time)
 
 1. Proxy segment passthrough via `ReadableStream` instead of buffering full TS files in Node.
 2. Mid-playback health re-check for long IPTV sessions.
 3. Prefetch the next source manifest on source switch.
 4. Lead the live demo from stable HLS cards (FIBA Akamai, Sofast, Red Bull) before IPTV samples.
+5. **Separate-audio sync:** align video/audio using `#EXT-X-PROGRAM-DATE-TIME` or MPEG-TS PCR instead of periodic `currentTime` nudges — current approach is good enough for short demos but can drift on long sessions or after buffer stalls.
 
 ## Trade-offs
 
 - **YAML over IPTV:** Predictable demo streams; catalog fetched from GitHub at runtime so stream lists can change without redeploying the frontend.
 - **Apple HLS test profile:** Reliable ABR/latency testing without flaky live sources.
 - **YouTube iframe + optional Data API:** Playback stays embed; live detection uses scrape by default, Data API when configured.
+- **Separate audio tracks:** Red Bull-style split manifests use dual HLS players with lightweight `currentTime` sync, not broadcast-grade A/V lock.
 - **Server-side HLS health + proxy:** Backend batch-probes manifests without browser CORS limits; proxy rewrites m3u8 (including `#EXT-X-KEY` / `#EXT-X-MAP` URIs) and passes binary segments through unchanged
 - **Required API base:** Frontend refuses to boot without `VITE_API_BASE` so reviewers always hit the backend path
 - **Hidden sources:** Keeps aggregator/backend URLs off the UI while still enabling failover within an event.

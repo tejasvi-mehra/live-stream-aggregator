@@ -12,6 +12,7 @@ import {
 import { resolveYouTubeLive } from './youtubeService';
 import { apiUrl } from './apiBase';
 import { getCatalogUrl } from './catalogUrl';
+import { applyAudioTrackHealth } from './audioTracks';
 
 const envProfile = import.meta.env.VITE_STREAM_PROFILE as 'test' | 'production' | undefined;
 
@@ -85,6 +86,11 @@ const buildSource = (
     channelUrl: sourceConfig.channelUrl,
     channelId: sourceConfig.channelId,
     hidden: sourceConfig.hidden === true,
+    audioTracks: sourceConfig.audio?.map((track, audioIndex) => ({
+      id: `${eventId}-src-${index}-audio-${audioIndex}`,
+      url: track.url,
+      label: track.label,
+    })),
   };
 };
 
@@ -258,6 +264,11 @@ const collectHlsUrls = (categories: StreamCategory[]): string[] => {
         if (source.type !== 'youtube' && source.url) {
           urls.push(source.url);
         }
+        for (const track of source.audioTracks ?? []) {
+          if (track.url) {
+            urls.push(track.url);
+          }
+        }
       }
     }
   }
@@ -288,6 +299,7 @@ const applyHlsHealthResults = (
           ...source,
           status,
           playbackUrl: status.reachable ? wrapHlsPlaybackUrl(source.url) : undefined,
+          audioTracks: applyAudioTrackHealth(source.audioTracks, healthByUrl, false),
         };
       }),
     })),
@@ -315,6 +327,7 @@ const applyDegradedHlsHealth = (categories: StreamCategory[]): StreamCategory[] 
             error: 'Availability not verified',
           },
           playbackUrl: wrapHlsPlaybackUrl(source.url),
+          audioTracks: applyAudioTrackHealth(source.audioTracks, {}, true),
         };
       }),
     })),
