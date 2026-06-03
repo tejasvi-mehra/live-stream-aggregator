@@ -127,8 +127,6 @@ profiles:
                   - url: https://play.redbull.com/streams/v1/rbtv/motor/ts/audio/en.m3u8
                     label: Main
 
-
-
       - id: youtube
         name: YouTube Live Streams
         events:

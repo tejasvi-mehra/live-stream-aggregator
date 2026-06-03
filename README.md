@@ -2,11 +2,11 @@
 
 A personal sports live-stream viewer: pick an event, switch sources, and watch in the browser. It aggregates a small curated set of public HLS and YouTube Live feeds in one UI — not a full-scale streaming platform, ingest pipeline, or CDN.
 
-**Live app:** https://live-stream-aggregator.vercel.app/
+**Live app:** [https://live-stream-aggregator.vercel.app/](https://live-stream-aggregator.vercel.app/)
 
-**Backend API:** https://live-stream-aggregator-backend-production.up.railway.app/
+**Backend API:** [https://live-stream-aggregator-backend-production.up.railway.app/](https://live-stream-aggregator-backend-production.up.railway.app/)
 
-**Backend repo:** https://github.com/tejasvi-mehra/live-stream-aggregator-backend
+**Backend repo:** [https://github.com/tejasvi-mehra/live-stream-aggregator-backend](https://github.com/tejasvi-mehra/live-stream-aggregator-backend)
 
 Package name: `live-stream-aggregator`
 
@@ -65,16 +65,20 @@ flowchart TB
   YTIframe --> YouTube
 ```
 
+
+
 ### Protocol choice: HTTP Live Streaming (HLS)
 
 This app **passes through** existing HLS feeds — it does not ingest, transcode, or package video itself.
 
-| Approach | Used here? | Why |
-|----------|------------|-----|
-| **HLS (M3U8 + TS/fMP4 segments)** | Yes | Widest browser support via MSE + hls.js; matches how most free sports CDNs and broadcasters deliver live video |
-| **LL-HLS** | Partially | Production player profile enables hls.js low-latency tuning where origins support it |
-| **DASH** | No | Fewer public sports sources expose MPD; adds player complexity for a personal tool |
-| **WebRTC** | No | Lower latency but needs a WebRTC-capable origin or media server — out of scope for aggregating public URLs |
+
+| Approach                          | Used here? | Why                                                                                                            |
+| --------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------- |
+| **HLS (M3U8 + TS/fMP4 segments)** | Yes        | Widest browser support via MSE + hls.js; matches how most free sports CDNs and broadcasters deliver live video |
+| **LL-HLS**                        | Partially  | Production player profile enables hls.js low-latency tuning where origins support it                           |
+| **DASH**                          | No         | Fewer public sports sources expose MPD; adds player complexity for a personal tool                             |
+| **WebRTC**                        | No         | Lower latency but needs a WebRTC-capable origin or media server — out of scope for aggregating public URLs     |
+
 
 HLS works by repeatedly downloading a **playlist** (`.m3u8`) that lists **media segments** (`.ts` or fMP4). The player buffers a sliding window of segments, adapts bitrate from multiple renditions when available, and stays near the live edge.
 
@@ -102,16 +106,20 @@ sequenceDiagram
 
   Browser->>GitHub: GET streams.yaml
   GitHub-->>Browser: categories / events / urls
-  Browser->>API: POST /api/hls/health/batch { urls[] }
-  loop each manifest (+ optional audio url)
+  Browser->>Browser: Render event grid (no health probe yet)
+  Note over Browser: User clicks an event
+  Browser->>API: POST /api/hls/health/batch { urls for that event }
+  loop manifests for selected event (+ optional audio urls)
     API->>Origin: GET m3u8 (+ probe first segment)
     Origin-->>API: 200 + playlist / segment bytes
   end
   API-->>Browser: { results: reachable, latencyMs }
-  Browser->>API: GET /api/youtube/live?channelUrl=... (per YT source)
+  Browser->>API: GET /api/youtube/live?channelUrl=... (if YouTube source)
   API-->>Browser: { isLive, channelId }
-  Browser->>Browser: Render event cards (live / offline)
+  Browser->>Browser: Open player with health-enriched source
 ```
+
+
 
 Playback URLs for HLS are rewritten to `https://live-stream-aggregator-backend-production.up.railway.app/api/hls/proxy?url=...` so all subsequent requests are same-origin from the browser’s perspective (relative to the API host).
 
@@ -142,6 +150,8 @@ sequenceDiagram
   end
 ```
 
+
+
 The proxy **rewrites** playlist lines (`#EXT-X-STREAM-INF`, `#EXT-X-KEY`, `#EXT-X-MAP`, segment URIs) so hls.js never talks to third-party origins directly. **Segments** are fetched with `arrayBuffer()` and returned without text decoding — binary-safe for TS.
 
 ### YouTube Live path
@@ -158,11 +168,11 @@ Some origins expose **video-only** and **audio-only** HLS playlists. The player 
 
 ## Stream catalog (`streams.yaml`)
 
-Source of truth: [`config/streams.yaml`](config/streams.yaml) in this repo.
+Source of truth: `[config/streams.yaml](config/streams.yaml)` in this repo.
 
 At runtime the app fetches:
 
-https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml
+[https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml](https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml)
 
 Override with `VITE_CATALOG_URL`. After editing on GitHub, refresh the app (or **Retry catalog**); allow ~1 minute for GitHub CDN cache.
 
@@ -189,15 +199,11 @@ profiles:
       - id: basketball          # slug for filters
         name: Basketball        # display name
         events:
-          - id: fiba-world-2026
-            name: FIBA 3x3 World Tour 2026
-            logo: https://...   # event card image URL
+          - id: red-bull-motorsport
+            name: Red Bull Motorsport
+            featured: true
+            logo: https://...
             streams:
-              - url: https://cdn.example.com/live/master.m3u8
-              - url: https://cdn.example.com/live/backup.m3u8
-              - type: youtube
-                channelUrl: https://www.youtube.com/@ChannelHandle
-                channelId: UC...   # optional; resolved if omitted
               - url: https://play.redbull.com/.../video/1280x720.m3u8
                 audio:
                   - url: https://play.redbull.com/.../audio/en.m3u8
@@ -206,30 +212,34 @@ profiles:
 
 ### Field reference
 
-| Field | Applies to | Description |
-|-------|------------|-------------|
-| `activeProfile` | Root | `test` or `production` — which profile loads by default |
-| `profiles.*.description` | Profile | Shown in the hero / profile meta |
-| `categories[].id` | Category | Stable slug (`basketball`, `soccer`, …) |
-| `categories[].name` | Category | Display label |
-| `events[].id` | Event | Stable slug within the category |
-| `events[].name` | Event | Title on event cards and player |
-| `events[].logo` | Event | Image URL for cards and hero |
-| `events[].featured` | Event | Optional. First `featured: true` in YAML file order drives the homepage hero; later flags are ignored |
-| `streams[].url` | HLS (default type) | Direct `.m3u8` manifest URL at the origin |
-| `streams[].type` | Source | `hls` (default) or `youtube` |
-| `streams[].audio[]` | HLS | Optional separate audio-only manifests |
-| `streams[].audio[].url` | HLS | Audio m3u8 URL |
-| `streams[].audio[].label` | HLS | Label in the audio switcher (e.g. `Main`) |
-| `streams[].channelUrl` | YouTube | Channel page (`/@handle`, `/channel/UC…`, `/user/name`) |
-| `streams[].channelId` | YouTube | Optional `UC…` ID; backend can resolve from URL |
+
+| Field                     | Applies to         | Description                                                                                           |
+| ------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
+| `activeProfile`           | Root               | `test` or `production` — which profile loads by default                                               |
+| `profiles.*.description`  | Profile            | Shown in the hero / profile meta                                                                      |
+| `categories[].id`         | Category           | Stable slug (`basketball`, `soccer`, …)                                                               |
+| `categories[].name`       | Category           | Display label                                                                                         |
+| `events[].id`             | Event              | Stable slug within the category                                                                       |
+| `events[].name`           | Event              | Title on event cards and player                                                                       |
+| `events[].logo`           | Event              | Image URL for cards and hero                                                                          |
+| `events[].featured`       | Event              | Optional. First `featured: true` in YAML file order drives the homepage hero; later flags are ignored |
+| `streams[].url`           | HLS (default type) | Direct `.m3u8` manifest URL at the origin                                                             |
+| `streams[].type`          | Source             | `hls` (default) or `youtube`                                                                          |
+| `streams[].audio[]`       | HLS                | Optional separate audio-only manifests                                                                |
+| `streams[].audio[].url`   | HLS                | Audio m3u8 URL                                                                                        |
+| `streams[].audio[].label` | HLS                | Label in the audio switcher (e.g. `Main`)                                                             |
+| `streams[].channelUrl`    | YouTube            | Channel page (`/@handle`, `/channel/UC…`, `/user/name`)                                               |
+| `streams[].channelId`     | YouTube            | Optional `UC…` ID; backend can resolve from URL                                                       |
+
 
 ### Profiles
 
-| Profile | Purpose |
-|---------|---------|
-| `test` | Apple HLS sample streams across all sports — stable ABR/latency testing |
+
+| Profile      | Purpose                                                                 |
+| ------------ | ----------------------------------------------------------------------- |
+| `test`       | Apple HLS sample streams across all sports — stable ABR/latency testing |
 | `production` | Curated mix of public HLS, YouTube, and multi-bitrate sources (default) |
+
 
 Switch via `activeProfile` in YAML or `VITE_STREAM_PROFILE=test|production`.
 
@@ -290,7 +300,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3001
+Open [http://localhost:3001](http://localhost:3001)
 
 ```bash
 npm run dev:test          # Apple HLS samples only
@@ -303,13 +313,15 @@ npm run test
 
 ## Resilience behavior
 
-| Scenario | Behavior |
-|----------|----------|
+
+| Scenario                      | Behavior                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------ |
 | Fatal HLS network/media error | Exponential backoff retry, then failover to next playable source in YAML order |
-| Buffer stall | Stall timer → recover media / restart load |
-| Backend health batch fails | Degraded mode: sources marked unverified but still attempt playback |
-| Catalog fetch fails | Error banner + **Retry catalog** |
-| YouTube channel offline | Event shows “Not live”; player not offered |
+| Buffer stall                  | Stall timer → recover media / restart load                                     |
+| Backend health batch fails    | Degraded mode on click: sources marked unverified but playback still attempted |
+| Catalog fetch fails           | Error banner + **Retry catalog**                                               |
+| YouTube channel offline       | Event shows “Not live”; player not offered                                     |
+
 
 ---
 
@@ -338,14 +350,17 @@ live-stream-aggregator/
 
 ## Trade-offs
 
-| Decision | Rationale |
-|----------|-----------|
-| **HLS pass-through + proxy** | No transcoding cost; fixes CORS and centralizes SSRF controls on the API |
-| **YAML catalog on GitHub** | Edit stream list without redeploying Vercel |
-| **hls.js over native-only** | Consistent behavior across Chrome/Firefox; ABR + error hooks |
-| **YouTube iframe only** | Avoids ToS-violating restream; simple live detection on API |
+
+| Decision                      | Rationale                                                                    |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| **HLS pass-through + proxy**  | No transcoding cost; fixes CORS and centralizes SSRF controls on the API     |
+| **YAML catalog on GitHub**    | Edit stream list without redeploying Vercel                                  |
+| **hls.js over native-only**   | Consistent behavior across Chrome/Firefox; ABR + error hooks                 |
+| **YouTube iframe only**       | Avoids ToS-violating restream; simple live detection on API                  |
+| **Lazy health on play**       | Fast catalog load; probe only the event the user opens                       |
 | **Thin API, no media server** | Appropriate for personal use — not built to scale to many concurrent viewers |
-| **Dual-player split audio** | Works with Red Bull-style origins; sync is best-effort, not broadcast-grade |
+| **Dual-player split audio**   | Works with Red Bull-style origins; sync is best-effort, not broadcast-grade  |
+
 
 ---
 
