@@ -96,9 +96,18 @@ profiles:
         events: 
           - id: padel
             name: RedBull Padel
-            logo: https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Soccer_ball.svg/250px-Soccer_ball.svg.png
+            logo: https://img.redbull.com/images/c_limit,w_4000/e_trim:1:transparent/c_limit,w_600/bo_5px_solid_rgb:00000000/q_auto:best,f_auto/redbullcom/2026/4/1/qhk3gmq6hplh0lgggdix/red-bull-padel-court-legends
             streams:
               - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/video/1280x720.m3u8 
+              - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/video/426x240.m3u8 
+          - id: motorsport
+            name: RedBull Motorsport
+            logo: https://upload.wikimedia.org/wikipedia/commons/thumb/6/62/RED_BULL_LOGO_2026.svg/3840px-RED_BULL_LOGO_2026.svg.png
+            streams: 
+              - url: https://play.redbull.com/streams/v1/rbtv/motor/ts/video/1280x720.m3u8
+              - url: https://play.redbull.com/streams/v1/rbtv/motor/ts/video/426x240.m3u8
+
+
 
       - id: youtube
         name: YouTube Live Streams
@@ -106,28 +115,28 @@ profiles:
         events:
           - id: locked-on-nba
             name: Locked On NBA
-            logo: /assets/locked_on_nba.png
+            logo: https://yt3.googleusercontent.com/XtOYINuph81oQJPNvebBFZGR-_hpsDSPyQRPWv8Vw_P5S1SdYzTjh3Lql-t3Qcseu86Ui_1BxJ4=s160-c-k-c0x00ffffff-no-rj
             streams:
               - type: youtube
                 channelId: UCZkd1SsoIdSY-8FEvvwRyEw
                 channelUrl: https://www.youtube.com/@LockedOnNBA
           - id: hoop-flix
             name: HoopFlix
-            logo: /assets/hoopflix.png
+            logo: https://yt3.googleusercontent.com/w50xmK4XmVwbTYmMVGnXqYwXrd6Aw3EpGfSugIRAImeKqTWVjO19cl0Y1glPIdSx3TAORcpdlA=s160-c-k-c0x00ffffff-no-rj
             streams: 
               - type: youtube
                 channelId: UC1Wt-vBY7SOjROTUMJHsp5Q
                 channelUrl: https://www.youtube.com/@HoopFlix
           - id: locked-on-nfl
             name: Locked On NFL
-            logo: /assets/locked_on_nfl.png
+            logo: https://yt3.googleusercontent.com/7YlCHc8K0RWeabDbGibfQtYCOvnIsEBUsSBi-tzzl731iD6YQNHwQ8zy_yLfOK1t_tbQPFnx1Q=s160-c-k-c0x00ffffff-no-rj
             streams:
               - type: youtube
                 channelId: UCPTyKqvL9KQlZSH8woMMs-w
                 channelUrl: https://www.youtube.com/@LockedOnNFL
           - id: NFL
             name: NFL
-            logo: https://upload.wikimedia.org/wikipedia/en/a/a2/National_Football_League_logo.svg
+            logo: https://yt3.googleusercontent.com/mTNz2WARw0gLIz_BM5cuB6oRAQCTapuIwiiAAHd-IeWMCfE_zNcRVOXt4N6c4YxJbQ_kibWOFg=s160-c-k-c0x00ffffff-no-rj
             streams:
               - type: youtube
                 channelId: UCDVYQ4Zhbm3S2dlz7P1GBDg
@@ -135,7 +144,7 @@ profiles:
 
           - id: f1-live
             name: Formula 1
-            logo: https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/F1.svg/250px-F1.svg.png
+            logo: https://yt3.googleusercontent.com/OjIDFlHinRLmfN75Zunw4e4NpdQKdcpEjRBMBILifgIAya9FLW68C6VPgNGLlk4GJ5z97sR2kQ=s160-c-k-c0x00ffffff-no-rj
             streams:
               - type: youtube
                 channelUrl: https://www.youtube.com/@Formula1
