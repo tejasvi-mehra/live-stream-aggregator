@@ -4,8 +4,26 @@ import {
   findFailoverSource,
   findNextPlayableSourceInEvent,
   isSourcePlayable,
+  loadConfiguredCatalog,
 } from './streamService';
 import { StreamCategory, StreamEvent, StreamSource } from '../types';
+import { DEFAULT_CATALOG_URL } from './catalogUrl';
+
+const sampleCatalogYaml = `
+activeProfile: production
+profiles:
+  production:
+    description: Test catalog
+    categories:
+      - id: basketball
+        name: Basketball
+        events:
+          - id: event-1
+            name: Demo
+            logo: https://example.com/logo.png
+            streams:
+              - url: https://example.com/a.m3u8
+`;
 
 const buildSource = (
   id: string,
@@ -32,6 +50,39 @@ const buildEvent = (streams: StreamSource[]): StreamEvent => ({
   categoryId: 'basketball',
   categoryName: 'Basketball',
   streams,
+});
+
+describe('loadConfiguredCatalog', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === DEFAULT_CATALOG_URL) {
+          return new Response(sampleCatalogYaml, {
+            status: 200,
+            headers: { 'Content-Type': 'text/yaml' },
+          });
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      })
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('loads categories from the hosted YAML URL', async () => {
+    const result = await loadConfiguredCatalog(true);
+    expect(result.profile.key).toBe('production');
+    expect(result.profile.description).toBe('Test catalog');
+    expect(result.categories[0].events[0].streams[0].url).toBe('https://example.com/a.m3u8');
+    expect(fetch).toHaveBeenCalledWith(
+      DEFAULT_CATALOG_URL,
+      expect.objectContaining({ cache: 'no-store' })
+    );
+  });
 });
 
 describe('checkCatalogHealth', () => {
