@@ -50,8 +50,8 @@ profiles:
             name: BasketBall Events
             logo: https://static.wikia.nocookie.net/nba-basketball/images/8/87/National_Basketball_Association.jpeg
             streams:
-              - url: http://23.237.104.106:8080/USA_FOX_DEPORTES/index.m3u8
-          
+              - url: https://na.linear.zype.com/e0bd0e23-a958-4e43-8164-4f2fef8876a8/fd3614bd-90bf-4530-a277-65ae3a1720c8-zype/live.m3u8
+              - url: https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8
           - id: fiba-world-2026
             name: FIBA 3x3 World Tour 2026
             logo: https://app2.rthk.hk/special/rthksports/upload_media/20260518172405_1418476825_diswebp.webp
@@ -87,7 +87,7 @@ profiles:
             name: Soccer Live Match
             logo: https://pngimg.com/uploads/fifa/fifa_PNG11.png
             streams:
-              - url: https://africa24.vedge.infomaniak.com/livecast/ik:africa24sport/manifest.m3u8
+              - url: https://edge13.vedge.infomaniak.com/livecast/ik:africa24sport/manifest.m3u8
 
       - id: motorsport
         name: Motorsport
