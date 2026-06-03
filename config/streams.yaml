@@ -48,7 +48,7 @@ profiles:
         events:
           - id: basketball-events
             name: BasketBall Events
-            logo: https://upload.wikimedia.org/wikipedia/commons/7/7a/Basketball.png
+            logo: https://static.wikia.nocookie.net/nba-basketball/images/8/87/National_Basketball_Association.jpeg
             streams:
               - url: http://23.237.104.106:8080/USA_FOX_DEPORTES/index.m3u8
           
@@ -67,7 +67,7 @@ profiles:
         events:
           - id: cricket-gold
             name: Cricket Gold
-            logo: https://upload.wikimedia.org/wikipedia/commons/thumb/2/2a/Cricket_bat.svg/250px-Cricket_bat.svg.png
+            logo: https://pngfre.com/wp-content/uploads/cricket-63-683x1024.png
             streams:
               - url: https://streams2.sofast.tv/scheduler/scheduleMaster/418.m3u8
 
@@ -85,7 +85,7 @@ profiles:
         events:
           - id: soccer-live
             name: Soccer Live Match
-            logo: https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Soccer_ball.svg/250px-Soccer_ball.svg.png
+            logo: https://pngimg.com/uploads/fifa/fifa_PNG11.png
             streams:
               - url: https://africa24.vedge.infomaniak.com/livecast/ik:africa24sport/manifest.m3u8
 
@@ -109,6 +109,10 @@ profiles:
                 audio:
                   - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/audio/en.m3u8
                     label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/video/640x360.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/audio/en.m3u8
+                    label: Main
               - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/video/426x240.m3u8
                 audio:
                   - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/audio/en.m3u8
@@ -122,9 +126,93 @@ profiles:
                 audio:
                   - url: https://play.redbull.com/streams/v1/rbtv/motor/ts/audio/en.m3u8
                     label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/motor/ts/video/640x360.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/motor/ts/audio/en.m3u8
+                    label: Main
               - url: https://play.redbull.com/streams/v1/rbtv/motor/ts/video/426x240.m3u8
                 audio:
                   - url: https://play.redbull.com/streams/v1/rbtv/motor/ts/audio/en.m3u8
+                    label: Main
+          - id: bike
+            name: RedBull Bike
+            logo: https://www.redbullring.com/en/wp-content/uploads/sites/1/fly-images/4997/KTM-Moto-2-Fuhrpark-Red-Bull-Ring-2880x9999.png
+            streams: 
+              - url: https://play.redbull.com/streams/v1/rbtv/bike/ts/video/1280x720.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/bike/ts/audio/en.m3u8
+                    label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/bike/ts/video/640x360.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/bike/ts/audio/en.m3u8
+                    label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/bike/ts/video/426x240.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/bike/ts/audio/en.m3u8
+                    label: Main
+          - id: adventure
+            name: RedBull Adventure
+            logo: https://img.redbull.com/images/redbullcom/2019/10/18/e0c3efcd-4f75-4367-ae03-0a7437cc5553/red-bull-neptune-steps-2020
+            streams: 
+              - url: https://play.redbull.com/streams/v1/rbtv/adventure/ts/video/1280x720.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/adventure/ts/audio/en.m3u8
+                    label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/adventure/ts/video/640x360.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/adventure/ts/audio/en.m3u8
+                    label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/adventure/ts/video/426x240.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/adventure/ts/audio/en.m3u8
+                    label: Main
+          - id: surf
+            name: RedBull Surfing
+            logo: https://img.redbull.com/images/c_limit,w_4000/e_trim:1:transparent/c_limit,w_300,h_300/bo_5px_solid_rgb:00000000/q_auto:best,f_auto/redbullcom/2015/06/20/1331730599874_2/red-bull-surf-and-rescue
+            streams: 
+              - url: https://play.redbull.com/streams/v1/rbtv/surf/ts/video/1280x720.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/surf/ts/audio/en.m3u8
+                    label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/surf/ts/video/640x360.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/surf/ts/audio/en.m3u8
+                    label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/surf/ts/video/426x240.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/surf/ts/audio/en.m3u8
+                    label: Main
+          - id: skateboarding
+            name: RedBull Skateboarding
+            logo: https://img.redbull.com/images/c_limit,w_4000/e_trim:1:transparent/bo_5px_solid_rgb:00000000/q_auto:best,f_auto/redbullcom/2023/1/28/spcqvyireuh7nbajdfxk/red-bull-drop-in-tour
+            streams: 
+              - url: https://play.redbull.com/streams/v1/rbtv/skateboarding/ts/video/1280x720.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/skateboarding/ts/audio/en.m3u8
+                    label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/skateboarding/ts/video/640x360.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/skateboarding/ts/audio/en.m3u8
+                    label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/skateboarding/ts/video/426x240.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/skateboarding/ts/audio/en.m3u8
+                    label: Main
+          - id: winter
+            name: RedBull Wintersports
+            logo: https://img.redbull.com/images/c_limit,w_1500,h_1000/f_auto,q_auto/redbullcom/2017/02/25/1331846604851_2/red-bull-all-snow-2017
+            streams: 
+              - url: https://play.redbull.com/streams/v1/rbtv/Winter/ts/video/1280x720.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/Winter/ts/audio/en.m3u8
+                    label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/Winter/ts/video/640x360.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/Winter/ts/audio/en.m3u8
+                    label: Main
+              - url: https://play.redbull.com/streams/v1/rbtv/Winter/ts/video/426x240.m3u8
+                audio:
+                  - url: https://play.redbull.com/streams/v1/rbtv/Winter/ts/audio/en.m3u8
                     label: Main
 
       - id: youtube
