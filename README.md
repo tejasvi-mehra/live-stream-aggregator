@@ -1,6 +1,6 @@
 # Live Stream Aggregator
 
-Sports live-stream aggregator built for the take-home assignment. It uses the same HLS.js player stack as `frontend/`, but loads a curated catalog from hosted YAML (GitHub raw) instead of IPTV M3U playlists.
+Sports live-stream aggregator with a curated YAML catalog, HLS.js playback, YouTube live embeds, and a companion API for proxying, health checks, and live detection.
 
 Package name: `live-stream-aggregator`
 
@@ -16,7 +16,7 @@ cd ../live-stream-aggregator-backend
 npm install
 npm run dev
 
-# Terminal 2 — frontend
+# Terminal 2 — web app
 cd sports-streaming
 cp .env.example .env
 npm install
@@ -42,15 +42,15 @@ npm test                  # unit tests
 
 Open http://localhost:3001
 
-## Live demo script
+## Demo flow
 
-Use this order during a review call:
+Suggested order when showing the app:
 
-1. Start **backend** on port 3002, then **frontend** with `VITE_API_BASE` set.
+1. Start the **backend** on port 3002, then the **web app** with `VITE_API_BASE` set.
 2. Open **FIBA 3x3** (Akamai HLS) or **Cricket Gold** (Sofast) first — stable public feeds, shows ABR and proxy playback.
-3. Open **Red Bull Padel** — second HLS origin, shows source switching.
-4. Try **Basketball / NFL / Soccer IPTV** samples only to demonstrate failover or public-feed proxying — say upfront they are demo IPTV URLs, not owned streams.
-5. Open **YouTube** events only if the channel is actually live; swap YAML handles to official broadcaster channels before the event.
+3. Open **Red Bull Padel** — second HLS origin, shows source switching and split audio.
+4. Try **Basketball / NFL / Soccer IPTV** samples to demonstrate failover or public-feed proxying — these are public demo URLs, not owned streams.
+5. Open **YouTube** events when the channel is live; swap YAML handles to official broadcaster channels as needed.
 
 If the amber **Unverified** banner appears, click **Retry connection** after the backend is up.
 
@@ -75,7 +75,7 @@ VITE_STREAM_PROFILE=test
 
 ## Config structure
 
-The catalog lives in `config/streams.yaml` in this repo. At runtime the app **fetches** it from GitHub (no frontend redeploy needed when you edit streams):
+The catalog lives in `config/streams.yaml` in this repo. At runtime the app **fetches** it from GitHub (no app redeploy needed when you edit streams):
 
 ```
 https://raw.githubusercontent.com/tejasvi-mehra/live-stream-aggregator/main/config/streams.yaml
@@ -123,6 +123,16 @@ profiles:
 |---------|---------|----------|
 | `test` | Development / QA | Apple HLS demo streams only — same two manifests shared across all sports, no YouTube, no hidden sources |
 | `production` | Live demo (**default**) | Curated mix of HLS, YouTube, and hidden public IPTV demo sources across basketball, cricket, football, motorsport, and soccer |
+
+Example — Red Bull TV split manifests:
+
+```yaml
+streams:
+  - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/video/1280x720.m3u8
+    audio:
+      - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/audio/main.m3u8
+        label: Main
+```
 
 Switch profiles via `activeProfile` in YAML or `VITE_STREAM_PROFILE=test|production`.
 
@@ -207,11 +217,11 @@ live-stream-aggregator/
 │   ├── VideoPlayer.tsx      # HLS player with failover
 │   ├── YouTubePlayer.tsx    # YouTube channel live embed
 │   ├── SourceSwitcher.tsx   # Multi-source footer links
+│   ├── AudioSwitcher.tsx    # Separate audio track links
 │   └── ...
-└── assets/                  # Production event logos (referenced as /assets/...)
 ```
 
-## Architecture vs frontend
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -231,15 +241,9 @@ flowchart LR
   App --> YTIframe
 ```
 
-| frontend | live-stream-aggregator |
-|----------|------------------------|
-| Fetches IPTV-org M3U playlists | Loads curated streams from YAML |
-| Generic TV categories | Sports categories with events |
-| `iptvService.ts` M3U parser | `streamService.ts` YAML loader + health checks |
-| Single stream per channel | Multiple sources per event with failover |
-| Port 3000 | Port 3001 (+ optional backend on 3002) |
-
-Shared: HLS.js, Safari native fallback, ABR quality selector, PiP, volume persistence.
+- **HLS:** hls.js loads manifests and segments through `/api/hls/proxy`
+- **YouTube:** backend checks live status; the client embeds `live_stream?channel=...`
+- **Catalog:** fetched from hosted YAML at startup, with server-side health probes before playback
 
 ## Production stream sources (important)
 
@@ -264,19 +268,9 @@ For YouTube events, swap sample `channelUrl` values to the official live channel
 
 ## Costs
 
-**$0** for the default setup — free IPTV HLS URLs, optional YouTube HTML scrape, no managed streaming services. The optional YouTube Data API stays within free quota for demo traffic.
+**$0** for the default setup — free IPTV HLS URLs, optional YouTube HTML scrape, no managed streaming services. The optional YouTube Data API stays within free quota for typical demo traffic.
 
-Example — Red Bull TV split manifests:
-
-```yaml
-streams:
-  - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/video/1280x720.m3u8
-    audio:
-      - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/audio/main.m3u8
-        label: Main
-```
-
-## Next steps (with more time)
+## Next steps
 
 1. Proxy segment passthrough via `ReadableStream` instead of buffering full TS files in Node.
 2. Mid-playback health re-check for long IPTV sessions.
@@ -286,10 +280,10 @@ streams:
 
 ## Trade-offs
 
-- **YAML over IPTV:** Predictable demo streams; catalog fetched from GitHub at runtime so stream lists can change without redeploying the frontend.
+- **YAML catalog:** Predictable stream lists; catalog fetched from GitHub at runtime so sources can change without redeploying the app.
 - **Apple HLS test profile:** Reliable ABR/latency testing without flaky live sources.
 - **YouTube iframe + optional Data API:** Playback stays embed; live detection uses scrape by default, Data API when configured.
 - **Separate audio tracks:** Red Bull-style split manifests use dual HLS players with lightweight `currentTime` sync, not broadcast-grade A/V lock.
 - **Server-side HLS health + proxy:** Backend batch-probes manifests without browser CORS limits; proxy rewrites m3u8 (including `#EXT-X-KEY` / `#EXT-X-MAP` URIs) and passes binary segments through unchanged
-- **Required API base:** Frontend refuses to boot without `VITE_API_BASE` so reviewers always hit the backend path
-- **Hidden sources:** Keeps aggregator/backend URLs off the UI while still enabling failover within an event.
+- **Required API base:** The app refuses to boot without `VITE_API_BASE` so playback always goes through the backend proxy path
+- **Hidden sources:** Keeps backup URLs off the UI while still enabling failover within an event.
