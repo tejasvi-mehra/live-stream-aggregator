@@ -19,7 +19,9 @@ Package name: `live-stream-aggregator`
 - **YouTube Live** via official iframe embeds; live detection runs on the backend
 - **Multi-source failover** — automatic and manual source switching within an event
 - **Separate audio tracks** — for origins that split video-only and audio-only HLS (e.g. Red Bull TV)
-- **Server-side health checks** — background batch probe after catalog load (once per page refresh), plus a fresh check when an event is opened; adaptive bitrate (ABR) quality picker in the player
+- **Server-side health checks** — background batch probe after catalog load (once per page refresh), plus a fresh check when an event is opened; unavailable events are greyed out and disabled on the grid
+- **Catalog search** — matches event names across all categories in a single **Search Results** section (ignores the active category filter while searching)
+- **Adaptive bitrate (ABR)** quality picker in the player
 
 Stream quality is the priority: fast startup, low rebuffering, clean ABR, and recovery when a source stalls or dies.
 
@@ -122,7 +124,20 @@ sequenceDiagram
   Browser->>Browser: Open player with health-enriched source
 ```
 
+### Search
 
+When the header search box has text:
+
+1. `filterCatalog()` scans **all** events (category pills are disabled).
+2. Matches are case-insensitive substrings of **event name** only (not category name).
+3. Results render under one section titled **Search Results**.
+4. Empty categories are not shown.
+
+Events stay clickable until background (or per-event) health marks them unavailable. Opening an event before health returns still runs the normal click-time health check.
+
+### Event ids in YAML
+
+Use **globally unique** `events[].id` values (e.g. `redbull-motorsport`, `youtube-f1-live`). Duplicate ids break React list keys and can show the wrong card title when switching between browse and search.
 
 Playback URLs for HLS are rewritten to `https://live-stream-aggregator-backend-production.up.railway.app/api/hls/proxy?url=...` so all subsequent requests are same-origin from the browser’s perspective (relative to the API host).
 
@@ -319,12 +334,14 @@ npm run test
 
 | Scenario                      | Behavior                                                                       |
 | ----------------------------- | ------------------------------------------------------------------------------ |
-| Fatal HLS network/media error | Exponential backoff retry, then failover to next playable source in YAML order |
+| Fatal HLS network/media error | Exponential backoff retry, then failover to next **untried** visible source in the event |
+| All sources fail in playback  | Generic “stream not available” message; event greyed out on catalog; no infinite failover loop |
 | Buffer stall                  | Stall timer → recover media / restart load                                     |
-| Playback still failing        | Generic “stream not available” message; **Retry** refetches health from API, **Prev/Next** switch sources |
+| Playback still failing        | Generic “stream not available” message; **Retry** refetches health from API; **Prev/Next** use health-playable sources only |
 | Background health batch fails | Catalog stays interactive; no grey-out until a per-event check succeeds        |
 | Backend health batch fails on click | Degraded mode: sources marked unverified but playback still attempted      |
 | Catalog fetch fails           | Error banner + **Retry catalog**                                               |
+| Search with no matches        | “No streams match your search” + **Clear search**                              |
 | YouTube channel offline       | Event greyed out after batch check; “Not live” if opened before batch returns  |
 
 
@@ -363,8 +380,9 @@ live-stream-aggregator/
 | **YAML catalog on GitHub**    | Edit stream list without redeploying Vercel                                  |
 | **hls.js over native-only**   | Consistent behavior across Chrome/Firefox; ABR + error hooks                 |
 | **YouTube iframe only**       | Avoids ToS-violating restream; simple live detection on API                  |
-| **Lazy health on play**       | Fast catalog load; full-catalog batch runs in background after render          |
+| **Background + click health** | Fast catalog render; batch probe once per page load; fresh check when an event opens |
 | **Session health cache**      | Liveness stored in `sessionStorage` for the tab; refreshed only on page reload |
+| **Name-only search**          | Simple substring match on event titles; “red” matches all RedBull* events      |
 | **Thin API, no media server** | Appropriate for personal use — not built to scale to many concurrent viewers |
 | **Dual-player split audio**   | Works with Red Bull-style origins; sync is best-effort, not broadcast-grade  |
 
@@ -379,6 +397,7 @@ live-stream-aggregator/
 - Proxy segment streaming via `ReadableStream` instead of buffering full TS in Node
 - Move catalog + health into a single API response
 - Re-run background health on a timer without full page refresh
+- Token or word-boundary search if substring matches are too broad
 
 ---
 
