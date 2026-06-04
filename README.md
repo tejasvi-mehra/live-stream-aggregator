@@ -19,7 +19,7 @@ Package name: `live-stream-aggregator`
 - **YouTube Live** via official iframe embeds; live detection runs on the backend
 - **Multi-source failover** — automatic and manual source switching within an event
 - **Separate audio tracks** — for origins that split video-only and audio-only HLS (e.g. Red Bull TV)
-- **Server-side health checks** before playback; adaptive bitrate (ABR) quality picker in the player
+- **Server-side health checks** — background batch probe after catalog load (once per page refresh), plus a fresh check when an event is opened; adaptive bitrate (ABR) quality picker in the player
 
 Stream quality is the priority: fast startup, low rebuffering, clean ABR, and recovery when a source stalls or dies.
 
@@ -55,7 +55,7 @@ flowchart TB
 
   UI --> Static
   UI -->|fetch catalog| GitHubYAML
-  UI -->|startup health| Health
+  UI -->|background health| Health
   UI -->|live check| YTLive
   HlsJs -->|manifest + TS segments| Proxy
   Proxy --> HLSOrigins
@@ -107,6 +107,9 @@ sequenceDiagram
   Browser->>GitHub: GET streams.yaml
   GitHub-->>Browser: categories / events / urls
   Browser->>Browser: Render event grid (no health probe yet)
+  Browser->>API: POST /api/hls/health/batch { all catalog urls }
+  API-->>Browser: { results: reachable, latencyMs }
+  Browser->>Browser: Grey out and disable unavailable events once batch returns
   Note over Browser: User clicks an event
   Browser->>API: POST /api/hls/health/batch { urls for that event }
   loop manifests for selected event (+ optional audio urls)
@@ -318,9 +321,11 @@ npm run test
 | ----------------------------- | ------------------------------------------------------------------------------ |
 | Fatal HLS network/media error | Exponential backoff retry, then failover to next playable source in YAML order |
 | Buffer stall                  | Stall timer → recover media / restart load                                     |
-| Backend health batch fails    | Degraded mode on click: sources marked unverified but playback still attempted |
+| Playback still failing        | Generic “stream not available” message; **Retry** refetches health from API, **Prev/Next** switch sources |
+| Background health batch fails | Catalog stays interactive; no grey-out until a per-event check succeeds        |
+| Backend health batch fails on click | Degraded mode: sources marked unverified but playback still attempted      |
 | Catalog fetch fails           | Error banner + **Retry catalog**                                               |
-| YouTube channel offline       | Event shows “Not live”; player not offered                                     |
+| YouTube channel offline       | Event greyed out after batch check; “Not live” if opened before batch returns  |
 
 
 ---
@@ -335,6 +340,7 @@ live-stream-aggregator/
 │   ├── apiBase.ts
 │   ├── catalogUrl.ts
 │   ├── streamService.ts      # catalog, health, failover
+│   ├── catalogHealthCache.ts # sessionStorage + background health merge
 │   ├── audioTracks.ts        # split-audio helpers
 │   └── youtubeService.ts
 ├── components/
@@ -357,7 +363,8 @@ live-stream-aggregator/
 | **YAML catalog on GitHub**    | Edit stream list without redeploying Vercel                                  |
 | **hls.js over native-only**   | Consistent behavior across Chrome/Firefox; ABR + error hooks                 |
 | **YouTube iframe only**       | Avoids ToS-violating restream; simple live detection on API                  |
-| **Lazy health on play**       | Fast catalog load; probe only the event the user opens                       |
+| **Lazy health on play**       | Fast catalog load; full-catalog batch runs in background after render          |
+| **Session health cache**      | Liveness stored in `sessionStorage` for the tab; refreshed only on page reload |
 | **Thin API, no media server** | Appropriate for personal use — not built to scale to many concurrent viewers |
 | **Dual-player split audio**   | Works with Red Bull-style origins; sync is best-effort, not broadcast-grade  |
 
@@ -371,6 +378,7 @@ live-stream-aggregator/
 - Prefetch next source manifest on source switch
 - Proxy segment streaming via `ReadableStream` instead of buffering full TS in Node
 - Move catalog + health into a single API response
+- Re-run background health on a timer without full page refresh
 
 ---
 

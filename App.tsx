@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StreamEvent, StreamSource, StreamCategory } from './types';
 import {
   checkEventHealth,
@@ -9,10 +9,18 @@ import {
   getFirstPlayableSource,
   getFirstVisibleSource,
   getVisibleEvents,
+  isEventMarkedUnavailable,
   loadConfiguredCatalog,
   mergeEventIntoCategories,
   getProfileMeta,
+  refreshCatalogHealthInBackground,
 } from './services/streamService';
+import {
+  markBackgroundHealthCompleted,
+  mergeCatalogHealthResults,
+  shouldStartBackgroundHealth,
+  writeCatalogHealthCache,
+} from './services/catalogHealthCache';
 import { APP_NAME } from './constants';
 import Header from './components/Header';
 import VideoPlayer from './components/VideoPlayer';
@@ -28,8 +36,12 @@ const App: React.FC = () => {
   const [selectedEvent, setSelectedEvent] = useState<StreamEvent | null>(null);
   const [activeSource, setActiveSource] = useState<StreamSource | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [streamReloadToken, setStreamReloadToken] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const categoriesRef = useRef<StreamCategory[]>([]);
+
+  categoriesRef.current = categories;
 
   const loadCatalog = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -54,6 +66,39 @@ const App: React.FC = () => {
     loadCatalog();
   }, [loadCatalog]);
 
+  useEffect(() => {
+    if (loading || categories.length === 0) {
+      return;
+    }
+
+    if (!shouldStartBackgroundHealth()) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      const checked = await refreshCatalogHealthInBackground(categoriesRef.current);
+      if (cancelled || !checked) {
+        return;
+      }
+
+      markBackgroundHealthCompleted();
+      writeCatalogHealthCache(profile.key, checked);
+
+      setCategories((current) => mergeCatalogHealthResults(current, checked));
+
+      setSelectedEvent((current) => {
+        if (!current) return current;
+        return findEventById(checked, current.id) ?? current;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, categories.length, profile.key]);
+
   const filteredCategories = useMemo(
     () => filterCatalog(categories, searchQuery, selectedCategory),
     [categories, searchQuery, selectedCategory]
@@ -65,6 +110,7 @@ const App: React.FC = () => {
     () => getFeaturedEvent(categories, featuredEventId),
     [categories, featuredEventId]
   );
+  const featuredUnavailable = featuredEvent ? isEventMarkedUnavailable(featuredEvent) : false;
 
   const categoryFilters = useMemo(
     () => [
@@ -80,12 +126,16 @@ const App: React.FC = () => {
   };
 
   const handleEventSelect = async (event: StreamEvent) => {
-    if (openingEventId) return;
+    if (openingEventId || isEventMarkedUnavailable(event)) return;
 
     setOpeningEventId(event.id);
     try {
       const { event: checkedEvent } = await checkEventHealth(event);
-      setCategories((current) => mergeEventIntoCategories(current, checkedEvent));
+      setCategories((current) => {
+        const merged = mergeEventIntoCategories(current, checkedEvent);
+        writeCatalogHealthCache(profile.key, merged);
+        return merged;
+      });
 
       const source =
         getFirstPlayableSource(checkedEvent) ?? getFirstVisibleSource(checkedEvent);
@@ -126,6 +176,23 @@ const App: React.FC = () => {
     syncActiveSource(refreshedEvent, refreshedSource);
   };
 
+  const handleRetryStream = async () => {
+    if (!selectedEvent || !activeSource) return;
+
+    const { event: checkedEvent } = await checkEventHealth(selectedEvent);
+    setCategories((current) => {
+      const merged = mergeEventIntoCategories(current, checkedEvent);
+      writeCatalogHealthCache(profile.key, merged);
+      return merged;
+    });
+    const refreshedSource =
+      checkedEvent.streams.find((item) => item.id === activeSource.id) ?? activeSource;
+
+    setSelectedEvent(checkedEvent);
+    setActiveSource(refreshedSource);
+    setStreamReloadToken((token) => token + 1);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col">
       <Header
@@ -139,7 +206,7 @@ const App: React.FC = () => {
 
       <main className="flex-1 pb-20">
         {featuredEvent && !searchQuery && selectedCategory === 'all' && !loading && (
-          <div className="relative w-full h-[50vh] md:h-[70vh] overflow-hidden">
+          <div className={`relative w-full h-[50vh] md:h-[70vh] overflow-hidden ${featuredUnavailable ? 'opacity-60' : ''}`}>
             <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/70 to-transparent z-10" />
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent z-10" />
             <img
@@ -155,8 +222,12 @@ const App: React.FC = () => {
               <p className="text-slate-300 md:text-lg mb-6">{profile.description}</p>
               <button
                 onClick={() => handleEventSelect(featuredEvent)}
-                disabled={Boolean(openingEventId)}
-                className="bg-emerald-500 text-black px-8 py-3 rounded-md font-bold text-lg flex items-center gap-2 hover:bg-emerald-400 transition-colors disabled:opacity-60 disabled:cursor-wait"
+                disabled={Boolean(openingEventId) || featuredUnavailable}
+                className={`px-8 py-3 rounded-md font-bold text-lg flex items-center gap-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                  featuredUnavailable
+                    ? 'bg-slate-700 text-slate-300'
+                    : 'bg-emerald-500 text-black hover:bg-emerald-400 disabled:cursor-wait'
+                }`}
               >
                 <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M8 5v14l11-7z" />
@@ -188,7 +259,7 @@ const App: React.FC = () => {
               <p className="text-slate-500 mt-2">
                 {loading
                   ? 'Loading catalog...'
-                  : `${visibleEvents.length} events · availability checked when you play`}
+                  : `${visibleEvents.length} events · checking availability in background`}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -272,6 +343,7 @@ const App: React.FC = () => {
         <VideoPlayer
           event={selectedEvent}
           activeStream={activeSource}
+          reloadToken={streamReloadToken}
           isMinimized={isMinimized}
           onMinimize={() => setIsMinimized(true)}
           onExpand={() => setIsMinimized(false)}
@@ -279,10 +351,12 @@ const App: React.FC = () => {
             setSelectedEvent(null);
             setActiveSource(null);
             setIsMinimized(false);
+            setStreamReloadToken(0);
           }}
           onNext={handleNextSource}
           onPrevious={handlePrevSource}
           onFailover={handleFailover}
+          onRetry={handleRetryStream}
           onSelectSource={handleSelectSource}
         />
       )}

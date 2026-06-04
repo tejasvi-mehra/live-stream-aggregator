@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { StreamEvent } from '../types';
-import { isEventSelectable } from '../services/streamService';
+import { isEventMarkedUnavailable, isEventSelectable } from '../services/streamService';
 import { FALLBACK_LOGO } from '../constants';
 
 interface EventCardProps {
@@ -12,27 +12,33 @@ interface EventCardProps {
 
 const EventCard: React.FC<EventCardProps> = ({ event, isOpening = false, onClick }) => {
   const selectable = isEventSelectable(event);
+  const unavailable = isEventMarkedUnavailable(event);
   const visibleSourceCount = event.streams.filter((source) => !source.hidden).length;
 
   const handleClick = () => {
-    if (!selectable || isOpening) return;
+    if (!selectable || isOpening || unavailable) return;
     void onClick(event);
   };
 
   return (
     <div
       onClick={handleClick}
-      className={`group relative flex flex-col gap-2 transition-transform duration-300 ${
-        selectable && !isOpening
-          ? 'cursor-pointer hover:scale-105'
-          : 'cursor-not-allowed opacity-70'
+      aria-disabled={unavailable}
+      className={`group relative flex flex-col gap-2 transition-all duration-300 ${
+        unavailable
+          ? 'opacity-45 grayscale cursor-not-allowed pointer-events-none'
+          : selectable && !isOpening
+            ? 'cursor-pointer hover:scale-105'
+            : 'cursor-not-allowed opacity-70'
       }`}
     >
       <div
         className={`aspect-video w-full bg-slate-800 rounded-lg overflow-hidden border relative ${
-          selectable && !isOpening
-            ? 'border-slate-700 group-hover:border-emerald-500'
-            : 'border-slate-800'
+          unavailable
+            ? 'border-slate-800'
+            : selectable && !isOpening
+              ? 'border-slate-700 group-hover:border-emerald-500'
+              : 'border-slate-800'
         }`}
       >
         <div className="absolute inset-0 flex items-center justify-center p-6 bg-gradient-to-br from-slate-900 to-slate-800">
@@ -59,7 +65,7 @@ const EventCard: React.FC<EventCardProps> = ({ event, isOpening = false, onClick
           </div>
         )}
 
-        {selectable && !isOpening && (
+        {selectable && !isOpening && !unavailable && (
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
             <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-emerald-600 rounded-full p-3 shadow-xl">
               <svg className="w-6 h-6 text-white translate-x-0.5" fill="currentColor" viewBox="0 0 24 24">
@@ -80,7 +86,11 @@ const EventCard: React.FC<EventCardProps> = ({ event, isOpening = false, onClick
       <div className="px-1">
         <h3
           className={`text-sm font-semibold truncate transition-colors ${
-            selectable ? 'text-slate-100 group-hover:text-emerald-400' : 'text-slate-400'
+            unavailable
+              ? 'text-slate-500'
+              : selectable
+                ? 'text-slate-100 group-hover:text-emerald-400'
+                : 'text-slate-400'
           }`}
         >
           {event.name}

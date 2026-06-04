@@ -477,6 +477,16 @@ export const checkCatalogHealth = async (
   }
 };
 
+export const refreshCatalogHealthInBackground = async (
+  categories: StreamCategory[]
+): Promise<StreamCategory[] | null> => {
+  const result = await checkCatalogHealth(categories);
+  if (result.healthUnavailable) {
+    return null;
+  }
+  return result.categories;
+};
+
 export const isSourcePlayable = (source: StreamSource): boolean => {
   if (source.type === 'youtube') {
     return Boolean(source.status?.reachable && source.channelId);
@@ -490,6 +500,22 @@ export const isEventPlayable = (event: StreamEvent): boolean => {
 
 export const isEventSelectable = (event: StreamEvent): boolean => {
   return event.streams.some((source) => !source.hidden);
+};
+
+export const isEventMarkedUnavailable = (event: StreamEvent): boolean => {
+  const visibleSources = event.streams.filter((source) => !source.hidden);
+  if (visibleSources.length === 0) {
+    return false;
+  }
+
+  const checkedSources = visibleSources.filter(
+    (source) => source.status && !source.status.uncertain
+  );
+  if (checkedSources.length === 0) {
+    return false;
+  }
+
+  return !isEventPlayable(event);
 };
 
 const getVisibleSources = (event: StreamEvent): StreamSource[] => {

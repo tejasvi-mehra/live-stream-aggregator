@@ -15,6 +15,8 @@ interface YouTubePlayerProps {
   onNext: () => void;
   onPrevious: () => void;
   onSelectSource: (source: StreamSource) => void;
+  hasPrevious?: boolean;
+  hasNext?: boolean;
 }
 
 const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
@@ -27,6 +29,8 @@ const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
   onNext,
   onPrevious,
   onSelectSource,
+  hasPrevious = true,
+  hasNext = true,
 }) => {
   const channelId = activeStream.channelId!;
   const embedUrl = buildYouTubeLiveEmbedUrl(channelId);
@@ -134,7 +138,13 @@ const YouTubePlayer: React.FC<YouTubePlayerProps> = ({
                 />
               </div>
             </div>
-            <PlayerNavButtons onPrevious={onPrevious} onNext={onNext} variant="footer" />
+            <PlayerNavButtons
+              onPrevious={onPrevious}
+              onNext={onNext}
+              hasPrevious={hasPrevious}
+              hasNext={hasNext}
+              variant="footer"
+            />
           </div>
         </div>
       )}

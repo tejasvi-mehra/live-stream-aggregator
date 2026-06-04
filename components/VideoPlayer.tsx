@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Hls, { ErrorDetails, ErrorTypes, Events } from 'hls.js';
 import { StreamEvent, StreamSource, StreamAudioTrack } from '../types';
-import { findFailoverSource, getStreamPlaybackUrl } from '../services/streamService';
+import { findFailoverSource, findNextPlayableSourceInEvent, getStreamPlaybackUrl } from '../services/streamService';
 import {
   findAudioTrackById,
   findFailoverAudioTrack,
@@ -31,6 +31,7 @@ interface QualityLevel {
 interface VideoPlayerProps {
   event: StreamEvent;
   activeStream: StreamSource;
+  reloadToken: number;
   isMinimized: boolean;
   onMinimize: () => void;
   onExpand: () => void;
@@ -38,16 +39,19 @@ interface VideoPlayerProps {
   onNext: () => void;
   onPrevious: () => void;
   onFailover: (stream: StreamSource) => void;
+  onRetry: () => Promise<void>;
   onSelectSource: (stream: StreamSource) => void;
 }
 
 const AUTOPLAY_KEY = 'livestream_autoplay_next';
 const VOLUME_KEY = 'livestream_volume';
 const MUTED_KEY = 'livestream_muted';
+const STREAM_UNAVAILABLE_MESSAGE = 'This stream is not available right now.';
 
 const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   event,
   activeStream,
+  reloadToken,
   isMinimized,
   onMinimize,
   onExpand,
@@ -55,6 +59,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   onNext,
   onPrevious,
   onFailover,
+  onRetry,
   onSelectSource,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -69,6 +74,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [retrying, setRetrying] = useState(false);
   const [switchingSource, setSwitchingSource] = useState(false);
   const [qualities, setQualities] = useState<QualityLevel[]>([]);
   const [currentQuality, setCurrentQuality] = useState<number>(-1);
@@ -80,6 +86,17 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   const profileKey = useMemo(() => getProfileMeta().key, []);
   const recoveryConfig = getRecoveryConfig(profileKey);
   const hlsConfig = getHlsConfig(profileKey);
+  const hasPrevious = useMemo(() => {
+    const previous = findNextPlayableSourceInEvent(event, activeStream.id, -1);
+    return previous !== null && previous.id !== activeStream.id;
+  }, [event, activeStream.id]);
+  const hasNext = useMemo(() => {
+    const next = findNextPlayableSourceInEvent(event, activeStream.id, 1);
+    return next !== null && next.id !== activeStream.id;
+  }, [event, activeStream.id]);
+  const navButtonClass = 'text-xs px-3 py-1 rounded';
+  const navButtonEnabledClass = `${navButtonClass} text-white bg-slate-800 hover:bg-slate-700`;
+  const navButtonDisabledClass = `${navButtonClass} text-slate-500 bg-slate-900 cursor-not-allowed`;
   const eventRef = useRef(event);
   const onFailoverRef = useRef(onFailover);
   const onNextRef = useRef(onNext);
@@ -105,6 +122,25 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
     }
     return getFirstPlayableAudioTrack(activeStream);
   }, [activeAudioTrackId, activeStream, event]);
+
+  const handleRetry = async () => {
+    if (retrying) return;
+
+    setRetrying(true);
+    setError(null);
+    setLoading(true);
+    recoverAttemptsRef.current = 0;
+    audioRecoverAttemptsRef.current = 0;
+
+    try {
+      await onRetry();
+    } catch {
+      setError(STREAM_UNAVAILABLE_MESSAGE);
+      setLoading(false);
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   useEffect(() => {
     const firstTrack =
@@ -383,21 +419,21 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
       clearRecoveryTimers();
     };
 
-    const failOrFailover = (message: string) => {
+    const failOrFailover = () => {
       clearRecoveryTimers();
       const fallback = findFailoverSource(eventRef.current, activeStream.id);
       if (fallback) {
         onFailoverRef.current(fallback);
         return;
       }
-      setError(message);
+      setError(STREAM_UNAVAILABLE_MESSAGE);
       setLoading(false);
     };
 
-    const scheduleRecover = (reason: string, recover: () => void) => {
+    const scheduleRecover = (recover: () => void) => {
       recoverAttemptsRef.current += 1;
       if (shouldFailoverAfterAttempt(recoverAttemptsRef.current, recoveryConfig.maxAttempts)) {
-        failOrFailover(`Stream Error: ${reason}`);
+        failOrFailover();
         return;
       }
 
@@ -434,13 +470,13 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
         if (data.fatal) {
           switch (data.type) {
             case ErrorTypes.NETWORK_ERROR:
-              scheduleRecover('network', () => hls.startLoad());
+              scheduleRecover(() => hls.startLoad());
               return;
             case ErrorTypes.MEDIA_ERROR:
-              scheduleRecover('media', () => hls.recoverMediaError());
+              scheduleRecover(() => hls.recoverMediaError());
               return;
             default:
-              failOrFailover(`Stream Error: ${data.type}`);
+              failOrFailover();
               return;
           }
         }
@@ -450,7 +486,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
           data.details === ErrorDetails.FRAG_LOAD_ERROR ||
           data.details === ErrorDetails.LEVEL_LOAD_ERROR
         ) {
-          scheduleRecover(data.details, () => {
+          scheduleRecover(() => {
             hls.recoverMediaError();
             hls.startLoad();
           });
@@ -464,7 +500,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
           if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
             return;
           }
-          scheduleRecover('stall', () => {
+          scheduleRecover(() => {
             hls.recoverMediaError();
             hls.startLoad();
           });
@@ -494,7 +530,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
         setLoading(false);
       };
       const onNativeError = () => {
-        scheduleRecover('native playback', () => {
+        scheduleRecover(() => {
           const currentTime = video.currentTime;
           video.load();
           video.currentTime = currentTime;
@@ -533,7 +569,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
       video.removeEventListener('ended', handleEnded);
       clearRecoveryTimers();
     };
-  }, [activeStream.id, activeStream.playbackUrl, activeStream.url, autoPlayNext, hlsConfig, profileKey, recoveryConfig, usesSeparateAudio]);
+  }, [activeStream.id, activeStream.playbackUrl, activeStream.url, autoPlayNext, hlsConfig, profileKey, recoveryConfig, reloadToken, usesSeparateAudio]);
 
   const togglePip = async () => {
     if (!videoRef.current) return;
@@ -594,7 +630,13 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
       {isMinimized && (
         <div className="absolute inset-0 z-40 flex flex-col items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black/40 pointer-events-none hover:pointer-events-auto">
           <div className="flex gap-3 pointer-events-auto">
-            <button onClick={onPrevious} className="p-2 bg-white/20 rounded-full text-white backdrop-blur">
+            <button
+              onClick={onPrevious}
+              disabled={!hasPrevious}
+              className={`p-2 rounded-full text-white backdrop-blur ${
+                hasPrevious ? 'bg-white/20 hover:scale-110 transition-transform' : 'bg-white/10 opacity-40 cursor-not-allowed'
+              }`}
+            >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
               </svg>
@@ -604,7 +646,13 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
               </svg>
             </button>
-            <button onClick={onNext} className="p-2 bg-white/20 rounded-full text-white backdrop-blur">
+            <button
+              onClick={onNext}
+              disabled={!hasNext}
+              className={`p-2 rounded-full text-white backdrop-blur ${
+                hasNext ? 'bg-white/20 hover:scale-110 transition-transform' : 'bg-white/10 opacity-40 cursor-not-allowed'
+              }`}
+            >
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M6 18l8.5-6L6 6zM16 6v12h2V6z" />
               </svg>
@@ -637,11 +685,30 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
           <div className="absolute inset-0 flex items-center justify-center text-center p-4 z-20">
             <div>
               <p className="text-red-500 text-sm font-bold mb-2">{error}</p>
-              <div className="flex gap-2 justify-center">
-                <button onClick={onPrevious} className="text-xs text-white bg-slate-800 px-3 py-1 rounded">
+              <div className="flex flex-wrap gap-2 justify-center">
+                <button
+                  onClick={handleRetry}
+                  disabled={retrying}
+                  className={`${navButtonClass} font-bold ${
+                    retrying
+                      ? 'text-slate-500 bg-slate-900 cursor-wait'
+                      : 'text-black bg-emerald-500 hover:bg-emerald-400'
+                  }`}
+                >
+                  {retrying ? 'Retrying...' : 'Retry'}
+                </button>
+                <button
+                  onClick={onPrevious}
+                  disabled={!hasPrevious}
+                  className={hasPrevious ? navButtonEnabledClass : navButtonDisabledClass}
+                >
                   Prev source
                 </button>
-                <button onClick={onNext} className="text-xs text-white bg-slate-800 px-3 py-1 rounded">
+                <button
+                  onClick={onNext}
+                  disabled={!hasNext}
+                  className={hasNext ? navButtonEnabledClass : navButtonDisabledClass}
+                >
                   Next source
                 </button>
                 <button onClick={onClose} className="text-xs text-white underline ml-2">
@@ -797,7 +864,13 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
                   <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${autoPlayNext ? 'left-4.5' : 'left-0.5'}`} />
                 </div>
               </button>
-              <PlayerNavButtons onPrevious={onPrevious} onNext={onNext} variant="footer" />
+              <PlayerNavButtons
+                onPrevious={onPrevious}
+                onNext={onNext}
+                hasPrevious={hasPrevious}
+                hasNext={hasNext}
+                variant="footer"
+              />
             </div>
           </div>
         </div>
@@ -807,7 +880,15 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
 };
 
 const VideoPlayer: React.FC<VideoPlayerProps> = (props) => {
-  const { event, activeStream } = props;
+  const { event, activeStream, onRetry } = props;
+  const hasPrevious = useMemo(() => {
+    const previous = findNextPlayableSourceInEvent(event, activeStream.id, -1);
+    return previous !== null && previous.id !== activeStream.id;
+  }, [event, activeStream.id]);
+  const hasNext = useMemo(() => {
+    const next = findNextPlayableSourceInEvent(event, activeStream.id, 1);
+    return next !== null && next.id !== activeStream.id;
+  }, [event, activeStream.id]);
 
   if (activeStream.type === 'youtube') {
     if (!activeStream.channelId || !activeStream.status?.reachable) {
@@ -818,17 +899,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = (props) => {
             <p className="text-slate-400 mb-6">
               {event.name} has no live YouTube source right now.
             </p>
-            <button
-              onClick={props.onClose}
-              className="bg-white text-black px-6 py-2 rounded font-bold hover:bg-gray-200"
-            >
-              Close
-            </button>
+            <div className="flex flex-wrap gap-2 justify-center">
+              <button
+                onClick={() => onRetry()}
+                className="bg-emerald-500 text-black px-6 py-2 rounded font-bold hover:bg-emerald-400"
+              >
+                Retry
+              </button>
+              <button
+                onClick={props.onClose}
+                className="bg-white text-black px-6 py-2 rounded font-bold hover:bg-gray-200"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       );
     }
-    return <YouTubePlayer {...props} />;
+    return <YouTubePlayer {...props} hasPrevious={hasPrevious} hasNext={hasNext} />;
   }
 
   return <HlsVideoPlayer {...props} />;
