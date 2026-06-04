@@ -40,6 +40,7 @@ interface VideoPlayerProps {
   onPrevious: () => void;
   onFailover: (stream: StreamSource) => void;
   onRetry: () => Promise<void>;
+  onSourcesExhausted: (event: StreamEvent) => void;
   onSelectSource: (stream: StreamSource) => void;
 }
 
@@ -60,6 +61,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   onPrevious,
   onFailover,
   onRetry,
+  onSourcesExhausted,
   onSelectSource,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -72,6 +74,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   const recoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const audioRecoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const failedSourceIdsRef = useRef<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState(false);
@@ -100,10 +103,12 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
   const eventRef = useRef(event);
   const onFailoverRef = useRef(onFailover);
   const onNextRef = useRef(onNext);
+  const onSourcesExhaustedRef = useRef(onSourcesExhausted);
 
   eventRef.current = event;
   onFailoverRef.current = onFailover;
   onNextRef.current = onNext;
+  onSourcesExhaustedRef.current = onSourcesExhausted;
 
   const [volume, setVolume] = useState<number>(() => {
     const saved = localStorage.getItem(VOLUME_KEY);
@@ -131,6 +136,7 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
     setLoading(true);
     recoverAttemptsRef.current = 0;
     audioRecoverAttemptsRef.current = 0;
+    failedSourceIdsRef.current.clear();
 
     try {
       await onRetry();
@@ -141,6 +147,10 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
       setRetrying(false);
     }
   };
+
+  useEffect(() => {
+    failedSourceIdsRef.current.clear();
+  }, [event.id]);
 
   useEffect(() => {
     const firstTrack =
@@ -421,11 +431,17 @@ const HlsVideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const failOrFailover = () => {
       clearRecoveryTimers();
-      const fallback = findFailoverSource(eventRef.current, activeStream.id);
+      failedSourceIdsRef.current.add(activeStream.id);
+      const fallback = findFailoverSource(
+        eventRef.current,
+        activeStream.id,
+        failedSourceIdsRef.current
+      );
       if (fallback) {
         onFailoverRef.current(fallback);
         return;
       }
+      onSourcesExhaustedRef.current(eventRef.current);
       setError(STREAM_UNAVAILABLE_MESSAGE);
       setLoading(false);
     };

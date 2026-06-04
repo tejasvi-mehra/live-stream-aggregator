@@ -558,21 +558,59 @@ export const findNextPlayableSourceInEvent = (
 
 export const findFailoverSource = (
   event: StreamEvent,
-  currentSourceId: string
+  currentSourceId: string,
+  excludedSourceIds: ReadonlySet<string> = new Set()
 ): StreamSource | null => {
-  const currentIndex = event.streams.findIndex((source) => source.id === currentSourceId);
-  if (currentIndex === -1) {
-    return getFirstPlayableSource(event);
+  const visibleSources = event.streams.filter((source) => !source.hidden);
+  if (visibleSources.length === 0) {
+    return null;
   }
 
-  for (let offset = 1; offset < event.streams.length; offset += 1) {
-    const candidate = event.streams[(currentIndex + offset) % event.streams.length];
-    if (isSourcePlayable(candidate)) {
+  const currentIndex = visibleSources.findIndex((source) => source.id === currentSourceId);
+  const startIndex = currentIndex === -1 ? 0 : currentIndex;
+
+  for (let offset = 1; offset < visibleSources.length; offset += 1) {
+    const candidate = visibleSources[(startIndex + offset) % visibleSources.length];
+    if (!excludedSourceIds.has(candidate.id)) {
       return candidate;
     }
   }
 
   return null;
+};
+
+export const markEventSourcesUnavailable = (event: StreamEvent): StreamEvent => {
+  const checkedAt = new Date().toISOString();
+
+  return {
+    ...event,
+    streams: event.streams.map((source) => {
+      if (source.hidden) {
+        return source;
+      }
+
+      return {
+        ...source,
+        status: {
+          reachable: false,
+          latencyMs: null,
+          checkedAt,
+          error: 'Playback failed',
+        },
+        playbackUrl: undefined,
+        audioTracks: source.audioTracks?.map((track) => ({
+          ...track,
+          status: {
+            reachable: false,
+            latencyMs: null,
+            checkedAt,
+            error: 'Playback failed',
+          },
+          playbackUrl: undefined,
+        })),
+      };
+    }),
+  };
 };
 
 export const getEventSourceSummary = (event: StreamEvent) => {

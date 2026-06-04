@@ -11,6 +11,7 @@ import {
   getVisibleEvents,
   isEventMarkedUnavailable,
   loadConfiguredCatalog,
+  markEventSourcesUnavailable,
   mergeEventIntoCategories,
   getProfileMeta,
   refreshCatalogHealthInBackground,
@@ -193,6 +194,16 @@ const App: React.FC = () => {
     setStreamReloadToken((token) => token + 1);
   };
 
+  const handleSourcesExhausted = (event: StreamEvent) => {
+    const marked = markEventSourcesUnavailable(event);
+    setCategories((current) => {
+      const merged = mergeEventIntoCategories(current, marked);
+      writeCatalogHealthCache(profile.key, merged);
+      return merged;
+    });
+    setSelectedEvent(marked);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col">
       <Header
@@ -357,6 +368,7 @@ const App: React.FC = () => {
           onPrevious={handlePrevSource}
           onFailover={handleFailover}
           onRetry={handleRetryStream}
+          onSourcesExhausted={handleSourcesExhausted}
           onSelectSource={handleSelectSource}
         />
       )}

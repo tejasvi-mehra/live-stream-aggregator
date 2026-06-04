@@ -5,8 +5,10 @@ import {
   findFailoverSource,
   findNextPlayableSourceInEvent,
   getFeaturedEvent,
+  isEventMarkedUnavailable,
   isSourcePlayable,
   loadConfiguredCatalog,
+  markEventSourcesUnavailable,
 } from './streamService';
 import { StreamCategory, StreamEvent, StreamSource } from '../types';
 import { getCatalogUrl } from './catalogUrl';
@@ -312,7 +314,7 @@ describe('checkEventHealth', () => {
 });
 
 describe('findFailoverSource', () => {
-  it('returns the next playable source in YAML order', () => {
+  it('returns the next visible source in YAML order', () => {
     const event = buildEvent([
       buildSource('src-0', false),
       buildSource('src-1', true),
@@ -323,13 +325,35 @@ describe('findFailoverSource', () => {
     expect(findFailoverSource(event, 'src-1')?.id).toBe('src-2');
   });
 
-  it('wraps around to the first playable source', () => {
+  it('wraps around to the first visible source', () => {
     const event = buildEvent([
       buildSource('src-0', true),
       buildSource('src-1', false),
     ]);
 
     expect(findFailoverSource(event, 'src-1')?.id).toBe('src-0');
+  });
+
+  it('skips excluded sources and stops when all are exhausted', () => {
+    const event = buildEvent([
+      buildSource('src-0', true),
+      buildSource('src-1', true),
+      buildSource('src-2', true),
+    ]);
+
+    expect(findFailoverSource(event, 'src-0', new Set(['src-1']))?.id).toBe('src-2');
+    expect(findFailoverSource(event, 'src-0', new Set(['src-1', 'src-2']))).toBeNull();
+  });
+});
+
+describe('markEventSourcesUnavailable', () => {
+  it('marks visible sources unreachable so the event greys out on the catalog', () => {
+    const event = buildEvent([buildSource('src-0', true), buildSource('src-1', true)]);
+
+    const marked = markEventSourcesUnavailable(event);
+
+    expect(marked.streams.every((source) => source.status?.reachable === false)).toBe(true);
+    expect(isEventMarkedUnavailable(marked)).toBe(true);
   });
 });
 
