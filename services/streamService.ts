@@ -18,6 +18,8 @@ const envProfile = import.meta.env.VITE_STREAM_PROFILE as 'test' | 'production' 
 
 let cachedConfig: StreamsConfig | null = null;
 
+export const SEARCH_RESULTS_CATEGORY_ID = 'search-results';
+
 const getActiveProfileKey = (config: StreamsConfig): 'test' | 'production' => {
   if (envProfile === 'test' || envProfile === 'production') {
     return envProfile;
@@ -216,21 +218,34 @@ export const filterCatalog = (
   categoryId: string
 ): StreamCategory[] => {
   const normalizedQuery = query.trim().toLowerCase();
+  const hasVisibleStream = (event: StreamEvent) =>
+    event.streams.some((source) => !source.hidden);
+
+  if (normalizedQuery) {
+    const matches = categories.flatMap((category) =>
+      category.events.filter(
+        (event) =>
+          hasVisibleStream(event) &&
+          event.name.toLowerCase().includes(normalizedQuery)
+      )
+    );
+
+    return [
+      {
+        id: SEARCH_RESULTS_CATEGORY_ID,
+        name: 'Search Results',
+        events: matches,
+      },
+    ];
+  }
 
   return categories
     .filter((category) => categoryId === 'all' || category.id === categoryId)
     .map((category) => ({
       ...category,
-      events: category.events
-        .filter((event) => event.streams.some((source) => !source.hidden))
-        .filter((event) => {
-          if (!normalizedQuery) return true;
-          return (
-            event.name.toLowerCase().includes(normalizedQuery) ||
-            category.name.toLowerCase().includes(normalizedQuery)
-          );
-        }),
-    }));
+      events: category.events.filter(hasVisibleStream),
+    }))
+    .filter((category) => category.events.length > 0);
 };
 
 const checkHlsStreamHealthBatch = async (

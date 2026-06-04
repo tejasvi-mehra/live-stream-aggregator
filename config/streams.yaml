@@ -101,7 +101,7 @@ profiles:
       - id: red-bull
         name: RedBull
         events: 
-          - id: padel
+          - id: redbull-padel
             name: RedBull Padel
             logo: https://img.redbull.com/images/c_limit,w_4000/e_trim:1:transparent/c_limit,w_600/bo_5px_solid_rgb:00000000/q_auto:best,f_auto/redbullcom/2026/4/1/qhk3gmq6hplh0lgggdix/red-bull-padel-court-legends
             streams:
@@ -117,7 +117,7 @@ profiles:
                 audio:
                   - url: https://play.redbull.com/streams/v1/rbtv/Padel/ts/audio/en.m3u8
                     label: Main
-          - id: motorsport
+          - id: redbull-motorsport
             name: RedBull Motorsport
             featured: true
             logo: https://upload.wikimedia.org/wikipedia/commons/thumb/6/62/RED_BULL_LOGO_2026.svg/3840px-RED_BULL_LOGO_2026.svg.png
@@ -134,7 +134,7 @@ profiles:
                 audio:
                   - url: https://play.redbull.com/streams/v1/rbtv/motor/ts/audio/en.m3u8
                     label: Main
-          - id: bike
+          - id: redbull-bike
             name: RedBull Bike
             logo: https://www.redbullring.com/en/wp-content/uploads/sites/1/fly-images/4997/KTM-Moto-2-Fuhrpark-Red-Bull-Ring-2880x9999.png
             streams: 
@@ -150,7 +150,7 @@ profiles:
                 audio:
                   - url: https://play.redbull.com/streams/v1/rbtv/bike/ts/audio/en.m3u8
                     label: Main
-          - id: adventure
+          - id: redbull-adventure
             name: RedBull Adventure
             logo: https://img.redbull.com/images/redbullcom/2019/10/18/e0c3efcd-4f75-4367-ae03-0a7437cc5553/red-bull-neptune-steps-2020
             streams: 
@@ -166,7 +166,7 @@ profiles:
                 audio:
                   - url: https://play.redbull.com/streams/v1/rbtv/adventure/ts/audio/en.m3u8
                     label: Main
-          - id: surf
+          - id: redbull-surf
             name: RedBull Surfing
             logo: https://img.redbull.com/images/c_limit,w_4000/e_trim:1:transparent/c_limit,w_300,h_300/bo_5px_solid_rgb:00000000/q_auto:best,f_auto/redbullcom/2015/06/20/1331730599874_2/red-bull-surf-and-rescue
             streams: 
@@ -182,7 +182,7 @@ profiles:
                 audio:
                   - url: https://play.redbull.com/streams/v1/rbtv/surf/ts/audio/en.m3u8
                     label: Main
-          - id: skateboarding
+          - id: redbull-skateboarding
             name: RedBull Skateboarding
             logo: https://img.redbull.com/images/c_limit,w_4000/e_trim:1:transparent/bo_5px_solid_rgb:00000000/q_auto:best,f_auto/redbullcom/2023/1/28/spcqvyireuh7nbajdfxk/red-bull-drop-in-tour
             streams: 
@@ -198,7 +198,7 @@ profiles:
                 audio:
                   - url: https://play.redbull.com/streams/v1/rbtv/skateboarding/ts/audio/en.m3u8
                     label: Main
-          - id: winter
+          - id: redbull-winter
             name: RedBull Wintersports
             logo: https://img.redbull.com/images/c_limit,w_1500,h_1000/f_auto,q_auto/redbullcom/2017/02/25/1331846604851_2/red-bull-all-snow-2017
             streams: 
@@ -218,28 +218,28 @@ profiles:
       - id: youtube
         name: YouTube Live Streams
         events:
-          - id: locked-on-nba
+          - id: youtube-locked-on-nba
             name: Locked On NBA
             logo: https://yt3.googleusercontent.com/XtOYINuph81oQJPNvebBFZGR-_hpsDSPyQRPWv8Vw_P5S1SdYzTjh3Lql-t3Qcseu86Ui_1BxJ4=s160-c-k-c0x00ffffff-no-rj
             streams:
               - type: youtube
                 channelId: UCZkd1SsoIdSY-8FEvvwRyEw
                 channelUrl: https://www.youtube.com/@LockedOnNBA
-          - id: hoop-flix
+          - id: youtube-hoop-flix
             name: HoopFlix
             logo: https://yt3.googleusercontent.com/w50xmK4XmVwbTYmMVGnXqYwXrd6Aw3EpGfSugIRAImeKqTWVjO19cl0Y1glPIdSx3TAORcpdlA=s160-c-k-c0x00ffffff-no-rj
             streams: 
               - type: youtube
                 channelId: UC1Wt-vBY7SOjROTUMJHsp5Q
                 channelUrl: https://www.youtube.com/@HoopFlix
-          - id: locked-on-nfl
+          - id: youtube-locked-on-nfl
             name: Locked On NFL
             logo: https://yt3.googleusercontent.com/7YlCHc8K0RWeabDbGibfQtYCOvnIsEBUsSBi-tzzl731iD6YQNHwQ8zy_yLfOK1t_tbQPFnx1Q=s160-c-k-c0x00ffffff-no-rj
             streams:
               - type: youtube
                 channelId: UCPTyKqvL9KQlZSH8woMMs-w
                 channelUrl: https://www.youtube.com/@LockedOnNFL
-          - id: NFL
+          - id: youtube-nfl
             name: NFL
             logo: https://yt3.googleusercontent.com/mTNz2WARw0gLIz_BM5cuB6oRAQCTapuIwiiAAHd-IeWMCfE_zNcRVOXt4N6c4YxJbQ_kibWOFg=s160-c-k-c0x00ffffff-no-rj
             streams:
@@ -247,7 +247,7 @@ profiles:
                 channelId: UCDVYQ4Zhbm3S2dlz7P1GBDg
                 channelUrl: https://www.youtube.com/@NFL
 
-          - id: f1-live
+          - id: youtube-f1-live
             name: Formula 1
             logo: https://yt3.googleusercontent.com/OjIDFlHinRLmfN75Zunw4e4NpdQKdcpEjRBMBILifgIAya9FLW68C6VPgNGLlk4GJ5z97sR2kQ=s160-c-k-c0x00ffffff-no-rj
             streams:

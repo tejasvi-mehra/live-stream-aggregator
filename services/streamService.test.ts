@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   checkCatalogHealth,
   checkEventHealth,
+  filterCatalog,
   findFailoverSource,
   findNextPlayableSourceInEvent,
   getFeaturedEvent,
@@ -9,6 +10,7 @@ import {
   isSourcePlayable,
   loadConfiguredCatalog,
   markEventSourcesUnavailable,
+  SEARCH_RESULTS_CATEGORY_ID,
 } from './streamService';
 import { StreamCategory, StreamEvent, StreamSource } from '../types';
 import { getCatalogUrl } from './catalogUrl';
@@ -378,5 +380,91 @@ describe('isSourcePlayable', () => {
     });
     expect(isSourcePlayable(youtube)).toBe(true);
     expect(isSourcePlayable({ ...youtube, channelId: undefined })).toBe(false);
+  });
+});
+
+describe('filterCatalog', () => {
+  const catalogCategories: StreamCategory[] = [
+    {
+      id: 'basketball',
+      name: 'Basketball',
+      events: [
+        {
+          id: 'bb-event',
+          name: 'NBA Live',
+          logo: '',
+          categoryId: 'basketball',
+          categoryName: 'Basketball',
+          streams: [
+            {
+              id: 'bb-src',
+              eventId: 'bb-event',
+              type: 'hls',
+              url: 'https://example.com/bb.m3u8',
+              hidden: false,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'red-bull',
+      name: 'RedBull',
+      events: [
+        {
+          id: 'rb-event',
+          name: 'RedBull Motorsport',
+          logo: '',
+          categoryId: 'red-bull',
+          categoryName: 'RedBull',
+          streams: [
+            {
+              id: 'rb-src',
+              eventId: 'rb-event',
+              type: 'hls',
+              url: 'https://example.com/rb.m3u8',
+              hidden: false,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: 'cricket',
+      name: 'Cricket',
+      events: [],
+    },
+  ];
+
+  it('returns a single Search Results category across all categories', () => {
+    const result = filterCatalog(catalogCategories, 'redbull', 'basketball');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe(SEARCH_RESULTS_CATEGORY_ID);
+    expect(result[0].name).toBe('Search Results');
+    expect(result[0].events.map((event) => event.id)).toEqual(['rb-event']);
+  });
+
+  it('returns Search Results with no events when nothing matches', () => {
+    const result = filterCatalog(catalogCategories, 'cricket', 'all');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe(SEARCH_RESULTS_CATEGORY_ID);
+    expect(result[0].events).toHaveLength(0);
+  });
+
+  it('filters by category when query is empty', () => {
+    const result = filterCatalog(catalogCategories, '', 'basketball');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('basketball');
+    expect(result[0].events).toHaveLength(1);
+  });
+
+  it('omits empty categories in browse mode', () => {
+    const result = filterCatalog(catalogCategories, '', 'all');
+
+    expect(result.find((category) => category.id === 'cricket')).toBeUndefined();
+    expect(result).toHaveLength(2);
   });
 });
