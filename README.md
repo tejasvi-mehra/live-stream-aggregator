@@ -329,6 +329,30 @@ npm run test
 
 ---
 
+## CI
+
+GitHub Actions runs on every push and pull request to `main` (workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+
+| Step | Command | Purpose |
+|------|---------|---------|
+| Install | `npm ci` | Reproducible lockfile install |
+| Test | `npm test` | Vitest unit tests (catalog, health cache, stream service, hls config) |
+| Build | `npm run build` | Vite production bundle; catches TypeScript and React compile errors |
+
+The build step sets `VITE_API_BASE` to the production Railway URL so the bundle matches deployed env shape. **Deploy is still handled by Vercel** on merge to `main`; CI is the quality gate before merge.
+
+Run the same checks locally before opening a PR:
+
+```bash
+npm ci
+npm test
+VITE_API_BASE=https://live-stream-aggregator-backend-production.up.railway.app npm run build
+```
+
+Optional: enable branch protection on `main` and require the **CI** check to pass.
+
+---
+
 ## Resilience behavior
 
 
